@@ -39,7 +39,7 @@
       const entry = (await listCloudFiles()).find((item) => item.id === id);
       if (loadId !== generation) return;
       if (!entry) throw new Error('This Library file could not be found. It may have been removed.');
-      const blob = await fetchCloudFile({ name: entry.name, ext: entry.ext, cloud: { id: entry.id, parts: entry.parts } });
+      const blob = await fetchCloudFile({ name: entry.name, ext: entry.ext, size: entry.size, cloud: { id: entry.id, parts: entry.parts } });
       if (loadId !== generation) return;
       file = entry;
       content = blob;
@@ -70,7 +70,7 @@
     if (!file || busy) return;
     busy = true; progress = 'Preparing download…'; problem = '';
     try {
-      await saveCloudFile({ name: file.name, ext: file.ext, cloud: { id: file.id, parts: file.parts } }, (done, total) => {
+      await saveCloudFile({ name: file.name, ext: file.ext, size: file.size, cloud: { id: file.id, parts: file.parts } }, (done, total) => {
         progress = total > 1 ? `Downloading ${Math.round((done / total) * 100)}%` : 'Preparing download…';
       });
     } catch (e) {

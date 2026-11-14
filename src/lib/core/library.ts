@@ -5,8 +5,9 @@ import { createIdb, type IdbRun } from './idb.ts';
 
 export type Kind = 'pdf' | 'image' | 'text' | 'other';
 /** `indexed` is set once we have tried to read the file's text (even if it had none, like a scan), so we never retry. */
-export interface LibFile { id: string; name: string; type: string; size: number; created: number; deleted?: number; indexed?: boolean; favorite?: boolean }
-export interface Query { text?: string; kind?: Kind | 'all'; trash?: boolean; favorite?: boolean }
+export interface LibFile { id: string; name: string; type: string; size: number; created: number; deleted?: number; indexed?: boolean; favorite?: boolean; hash?: string }
+export type Sort = 'newest' | 'oldest' | 'name' | 'size';
+export interface Query { text?: string; kind?: Kind | 'all'; trash?: boolean; favorite?: boolean; sort?: Sort }
 /** A search result; `snippet` is an excerpt from the file's text when the match is inside it. */
 export interface Hit { file: LibFile; snippet?: string }
 /** Returns the searchable text of a file, or undefined if this kind of file has none. May throw (for example, encrypted PDFs). */
@@ -26,11 +27,35 @@ export const TRASH_DAYS = 30;
 export const kindOf = (type: string): Kind =>
   type === 'application/pdf' ? 'pdf' : type.startsWith('image/') ? 'image' : type.startsWith('text/') ? 'text' : 'other';
 
+const EXT = /\.[A-Za-z][A-Za-z0-9]{0,7}$/;
+/** A rename that drops the extension ("report.pdf" → "Quarterly report") keeps the old one, so the name matches what is downloaded. */
+export function keepExtension(oldName: string, newName: string): string {
+  const n = newName.trim(), ext = EXT.exec(oldName.trim())?.[0];
+  return n && ext && !EXT.test(n) ? n + ext : n;
+}
+
 /** Same matching rule as the file picker's `accept` list ("image/*,application/pdf"). */
 export const matchesAccept = (type: string, accept: string): boolean =>
   accept.split(',').some((a) => { const t = a.trim(); return t.endsWith('/*') ? type.startsWith(t.slice(0, -1)) : type === t; });
 
-/** Filter by trash state, name search and kind; newest first. */
+const byName = (a: LibFile, b: LibFile) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+const SORTS: Record<Sort, (a: LibFile, b: LibFile) => number> = {
+  newest: (a, b) => b.created - a.created, oldest: (a, b) => a.created - b.created,
+  name: (a, b) => byName(a, b) || b.created - a.created, size: (a, b) => b.size - a.size || b.created - a.created,
+};
+/** "report.pdf" → "report (2).pdf", skipping any name in `taken` (compared without regard to case). */
+export function uniqueName(name: string, taken: Iterable<string>): string {
+  const used = new Set([...taken].map((n) => n.toLowerCase()));
+  if (!used.has(name.toLowerCase())) return name;
+  const ext = EXT.exec(name)?.[0] ?? '', base = ext ? name.slice(0, -ext.length) : name;
+  for (let n = 2; ; n++) { const c = `${base} (${n})${ext}`; if (!used.has(c.toLowerCase())) return c; }
+}
+async function sha256(buf: ArrayBuffer): Promise<string | undefined> {
+  try { return [...new Uint8Array(await crypto.subtle.digest('SHA-256', buf))].map((b) => b.toString(16).padStart(2, '0')).join(''); }
+  catch { return undefined; }   // crypto.subtle only exists on secure pages; without it, nothing is de-duplicated
+}
+
+/** Filter by trash state, name search and kind; newest first unless a sort is given. */
 export function select(files: LibFile[], q: Query = {}): LibFile[] {
   const text = (q.text ?? '').trim().toLowerCase();
   return files
@@ -38,7 +63,7 @@ export function select(files: LibFile[], q: Query = {}): LibFile[] {
       && (!text || f.name.toLowerCase().includes(text))
       && (!q.kind || q.kind === 'all' || kindOf(f.type) === q.kind)
       && (!q.favorite || !!f.favorite))
-    .sort((a, b) => b.created - a.created);
+    .sort(SORTS[q.sort ?? 'newest']);
 }
 
 /** Match files by name and, when known, by the text inside them. Every search word must appear in the name or the text. */
@@ -59,13 +84,33 @@ const defaultId = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toSt
 
 export class Library {
   private cache?: Map<string, string>;   // extracted texts, loaded on first search
+  private queue: Promise<unknown> = Promise.resolve();
+  /** Run read-modify-write steps one at a time, so a rename, star or trash cannot be overwritten by a slower write (such as indexing) that read the old metadata. */
+  private serial<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(fn, fn);
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
   constructor(private store: LibStore, private now: () => number = Date.now, private newId: () => string = defaultId,
     private extract?: Extractor) {}
 
+  /** Save a copy. Saving the same file again (same name and content) keeps one copy, and brings it back from the trash if needed.
+   *  A different file with a name that is already used gets "(2)" added, so two rows are never confusable. */
   async save(name: string, blob: Blob): Promise<LibFile> {
-    const meta: LibFile = { id: this.newId(), name: name.trim() || 'file', type: blob.type || 'application/octet-stream', size: blob.size, created: this.now() };
-    await this.store.put(meta, await blob.arrayBuffer());
-    return meta;
+    const buf = await blob.arrayBuffer(), hash = await sha256(buf), clean = name.trim() || 'file';
+    return this.serial(async () => {
+      const metas = await this.store.metas();
+      const same = hash ? metas.find((m) => m.hash === hash && m.name.toLowerCase() === clean.toLowerCase()) : undefined;
+      if (same) {
+        if (!same.deleted) return same;
+        const back = { ...same, created: this.now() }; delete back.deleted;   // restored, and it counts as just saved
+        await this.store.setMeta(back); return back;
+      }
+      const taken = metas.filter((m) => !m.deleted).map((m) => m.name);
+      const meta: LibFile = { id: this.newId(), name: uniqueName(clean, taken), type: blob.type || 'application/octet-stream', size: blob.size, created: this.now(), ...(hash ? { hash } : {}) };
+      await this.store.put(meta, buf);
+      return meta;
+    });
   }
   async list(q?: Query): Promise<LibFile[]> { return select(await this.store.metas(), q); }
   /** Like list(), but the search words are also looked up inside the files' text. Reads all stored text on first use. */
@@ -83,11 +128,13 @@ export class Library {
       const buf = this.extract && await this.store.data(id);
       if (buf) text = (await this.extract!(new Blob([buf], { type: m.type }), m.type))?.slice(0, MAX_CHARS);
     } catch { /* unreadable or password-protected: the file stays searchable by name */ }
-    const now = (await this.store.metas()).find((x) => x.id === id);   // may have been renamed or deleted meanwhile
-    if (!now) return false;
-    if (text) { await this.store.setText(id, text); this.cache = undefined; }
-    await this.store.setMeta({ ...now, indexed: true });
-    return !!text;
+    return this.serial(async () => {
+      const now = (await this.store.metas()).find((x) => x.id === id);   // may have been renamed or deleted meanwhile
+      if (!now) return false;
+      if (text) { await this.store.setText(id, text); this.cache = undefined; }
+      await this.store.setMeta({ ...now, indexed: true });
+      return !!text;
+    });
   }
   /** Index every file that has not been read yet (older saves, or a save whose indexing was interrupted). */
   async indexPending(onProgress?: (done: number, total: number) => void): Promise<number> {
@@ -99,16 +146,27 @@ export class Library {
     const meta = (await this.store.metas()).find((m) => m.id === id); const buf = meta && await this.store.data(id);
     return meta && buf ? new File([buf], meta.name, { type: meta.type }) : undefined;
   }
-  private async patch(id: string, f: (m: LibFile) => LibFile) {
-    const m = (await this.store.metas()).find((x) => x.id === id); if (m) await this.store.setMeta(f({ ...m }));
+  private patch(id: string, f: (m: LibFile) => LibFile) {
+    return this.serial(async () => {
+      const m = (await this.store.metas()).find((x) => x.id === id); if (m) await this.store.setMeta(f({ ...m }));
+    });
   }
   rename(id: string, name: string) { const n = name.trim(); return n ? this.patch(id, (m) => ({ ...m, name: n })) : Promise.resolve(); }
   /** Star or unstar a file. The star is kept if the file goes to the trash and comes back. */
   setFavorite(id: string, on: boolean) { return this.patch(id, (m) => { if (on) m.favorite = true; else delete m.favorite; return m; }); }
+  /** Apply one change to several files in a single step. */
+  private patchMany(ids: string[], f: (m: LibFile) => LibFile) {
+    const want = new Set(ids);
+    return this.serial(async () => { for (const m of await this.store.metas()) if (want.has(m.id)) await this.store.setMeta(f({ ...m })); });
+  }
+  trashMany(ids: string[]) { return this.patchMany(ids, (m) => ({ ...m, deleted: this.now() })); }
+  restoreMany(ids: string[]) { return this.patchMany(ids, (m) => { delete m.deleted; return m; }); }
+  favoriteMany(ids: string[], on: boolean) { return this.patchMany(ids, (m) => { if (on) m.favorite = true; else delete m.favorite; return m; }); }
+  removeMany(ids: string[]) { return this.serial(async () => { for (const id of ids) await this.store.remove(id); this.cache = undefined; }); }
   trash(id: string) { return this.patch(id, (m) => ({ ...m, deleted: this.now() })); }
   restore(id: string) { return this.patch(id, (m) => { delete m.deleted; return m; }); }
-  async removeForever(id: string) { await this.store.remove(id); this.cache = undefined; }
-  async emptyTrash() { for (const f of await this.list({ trash: true })) await this.store.remove(f.id); this.cache = undefined; }
+  removeForever(id: string) { return this.serial(async () => { await this.store.remove(id); this.cache = undefined; }); }
+  emptyTrash() { return this.serial(async () => { for (const f of await this.list({ trash: true })) await this.store.remove(f.id); this.cache = undefined; }); }
   /** Permanently remove anything that has been in the trash longer than `days`. Returns how many were removed. */
   async purgeOld(days = TRASH_DAYS): Promise<number> {
     const cutoff = this.now() - days * 86_400_000; let n = 0;

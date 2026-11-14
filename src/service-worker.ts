@@ -2,6 +2,7 @@
 import { immutable, assets, prerendered } from '$app/manifest';
 import { version } from '$app/env';
 import { SHARE_CACHE, SHARE_FIELD, SHARE_PATH, storeShared } from '#lib/core/share.ts';
+import { FILE_CACHE_NAME } from '#lib/core/file-cache.ts';
 import { NAV_TIMEOUT_MS, planPrecache } from '#lib/core/precache.ts';
 
 const sw = self as unknown as ServiceWorkerGlobalScope;
@@ -25,7 +26,7 @@ sw.addEventListener('install', (e) => {
 });
 sw.addEventListener('message', (e) => { if (e.data?.type === 'SKIP_WAITING') void sw.skipWaiting(); });
 sw.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE && k !== SHARE_CACHE).map((k) => caches.delete(k)))).then(() => sw.clients.claim()));
+  e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE && k !== SHARE_CACHE && k !== FILE_CACHE_NAME).map((k) => caches.delete(k)))).then(() => sw.clients.claim()));
 });
 
 const OFFLINE_PAGE = () => new Response(

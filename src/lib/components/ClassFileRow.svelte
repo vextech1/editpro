@@ -16,7 +16,7 @@
   async function getCloud() {
     if (!file.cloud || progress) return;
     failed = ''; progress = 'Preparing…';
-    try { await saveCloudFile({ name: file.name, ext: file.ext, cloud: file.cloud }, (d, t) => (progress = t > 1 ? `Downloading ${Math.round((d / t) * 100)}%` : 'Downloading…')); }
+    try { await saveCloudFile({ name: file.name, ext: file.ext, size: file.size, cloud: file.cloud }, (d, t) => (progress = t > 1 ? `Downloading ${Math.round((d / t) * 100)}%` : 'Downloading…')); }
     catch (e) { failed = friendlyCloudError((e as { code?: string })?.code, 'The download did not finish. Please try again.'); }
     finally { progress = ''; }
   }

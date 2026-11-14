@@ -27,6 +27,8 @@ export function takePending(ok: (f: File) => boolean, now = Date.now()): { files
 export function ago(then: number, now = Date.now()): string {
   const m = Math.max(0, Math.floor((now - then) / 60_000));
   if (m < 1) return 'just now'; if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60); if (h < 24) return `${h} hr ago`;
-  const d = Math.round(h / 24); return d === 1 ? 'yesterday' : `${d} days ago`;
+  const h = Math.floor(m / 60); if (h < 24) return `${h} hr ago`;   // floor, so 35 hours is "yesterday" and 47 hours is not "2 days ago"
+  const d = Math.floor(h / 24); if (d === 1) return 'yesterday';
+  if (d < 30) return `${d} days ago`;
+  return new Date(then).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });   // "400 days ago" is hard to read; show the date
 }
