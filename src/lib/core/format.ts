@@ -1,7 +1,8 @@
 export function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
-  if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1048576).toFixed(2)} MB`;
+  const units = ['KB', 'MB', 'GB']; let v = n / 1024, i = 0;
+  while (v >= 1023.95 && i < units.length - 1) { v /= 1024; i++; }   // 1048575 B reads "1.00 MB", not "1024.0 KB"
+  return `${v.toFixed(i === 0 ? 1 : 2)} ${units[i]}`;
 }
 
 export function baseName(name: string): string {
