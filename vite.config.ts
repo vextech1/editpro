@@ -25,7 +25,7 @@ export default defineConfig({
           'style-src': ['self', 'unsafe-inline'],
           'img-src': ['self', 'data:', 'blob:', 'https:'],
           'connect-src': ['self', 'blob:', 'data:', 'https:'],
-          'frame-src': ['https:'],
+          'frame-src': ['blob:', 'https:'],
           'media-src': ['self', 'blob:', 'https:'],
           'worker-src': ['self', 'blob:'],
           'font-src': ['self'],

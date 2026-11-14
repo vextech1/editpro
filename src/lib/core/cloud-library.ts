@@ -91,6 +91,7 @@ export const toClassFile = (f: CloudFile): ClassFile => ({
   id: `cloud/${f.id}`, name: f.name, title: f.title, size: f.size, ext: f.ext, category: f.category,
   added: f.added || undefined, cloud: { id: f.id, parts: f.parts }
 });
+export const fileViewerHref = (id: string): string => `/class-library/file?id=${encodeURIComponent(id)}`;
 export const cloudForClass = (files: CloudFile[], section: string, cls: string): CloudFile[] => files.filter((f) => f.section === section && f.cls === cls);
 export const cloudForSubject = (files: CloudFile[], section: string, cls: string, subject: string): CloudFile[] => files.filter((f) => f.section === section && f.cls === cls && f.subject === subject);
 export const cloudBytes = (files: CloudFile[]): number => files.reduce((n, f) => n + f.size, 0);

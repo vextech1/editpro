@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { fileViewerHref } from '#lib/core/cloud-library.ts';
   import { categoryLabel, isRecent, shareLink, type ClassFile } from '#lib/core/class-library.ts';
   import { fmtBytes } from '#lib/core/format.ts';
   import { friendlyCloudError } from '#lib/core/cloud-library.ts';
@@ -10,7 +11,7 @@
   let now = $state(0);
   onMount(() => { now = Date.now(); });
   const fresh = $derived(now > 0 && isRecent(file.added, now));
-  // A file uploaded from the website is read from Firestore piece by piece, then saved to the device: no link, so a button.
+  // Uploaded files are read from Firestore piece by piece, then saved to the device.
   let progress = $state(''); let failed = $state('');
   async function getCloud() {
     if (!file.cloud || progress) return;
@@ -20,16 +21,18 @@
     finally { progress = ''; }
   }
   const detail = $derived([categoryLabel(file.category), file.ext.toUpperCase(), fmtBytes(file.size), file.added].filter(Boolean).join(' · '));
+  const viewerHref = $derived(file.cloud ? fileViewerHref(file.cloud.id) : '#');
 </script>
 
 <li class="row">
   <span class="mark" aria-hidden="true">{file.ext.slice(0, 4).toUpperCase()}</span>
   <div class="grow">
-    <button class="name linklike" type="button" onclick={getCloud}>{file.title}</button>
+    <a class="name" href={viewerHref}>{file.title}</a>
   {#if fresh} <span class="new">New</span>{/if}
     <div class="sub">{#if classTitle}<a href={classHref}>{classTitle}</a><span aria-hidden="true"> · </span>{/if}<span>{detail}</span></div>
     {#if failed}<div class="sub err" role="alert">{failed}</div>{/if}
   </div>
+  <a class="btn small" href={viewerHref} aria-label={`Open ${file.title}`}>Open</a>
   <a class="share" href={shareLink(file.title, pagePath)} target="_blank" rel="noopener noreferrer" aria-label={`Share ${file.title} on WhatsApp`}>Share</a>
   <button class="btn small" type="button" onclick={getCloud} disabled={!!progress} aria-label={`Download ${file.title}`}>{progress || 'Download'}</button>
 </li>
@@ -37,7 +40,6 @@
 <style>
   .name { color: var(--ink); font-weight: 650; text-decoration: none; }
   .name:hover { text-decoration: underline; }
-  .linklike { font: inherit; font-weight: 650; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
   .err { color: var(--warn); }
   .sub a { color: var(--muted); }
   .btn { text-decoration: none; flex: none; }

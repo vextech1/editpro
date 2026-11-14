@@ -65,11 +65,17 @@ export async function getLibraryStructure(): Promise<LibraryStructure> {
   } catch { return []; }
 }
 
-/** Reads the file's pieces and hands the finished file to the browser as a normal download. */
-export async function saveCloudFile(file: { name: string; ext: string; cloud: { id: string; parts: number } }, onProgress?: (done: number, total: number) => void): Promise<void> {
+/** Reads the file's pieces and returns them with their original content type. */
+export async function fetchCloudFile(file: { name: string; ext: string; cloud: { id: string; parts: number } }, onProgress?: (done: number, total: number) => void): Promise<Blob> {
   const store = makeStore(await reader());
   const bytes = await downloadCloud(store, file.cloud.id, file.cloud.parts, onProgress);
-  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mimeOf(file.ext) }));
+  return new Blob([bytes as BlobPart], { type: mimeOf(file.ext) });
+}
+
+/** Reads the file's pieces and hands the finished file to the browser as a normal download. */
+export async function saveCloudFile(file: { name: string; ext: string; cloud: { id: string; parts: number } }, onProgress?: (done: number, total: number) => void): Promise<void> {
+  const blob = await fetchCloudFile(file, onProgress);
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = file.name; a.rel = 'noopener'; document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);

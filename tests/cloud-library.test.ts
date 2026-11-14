@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CHUNK_BYTES, CLOUD_MAX_BYTES, checkCloudUpload, cloudBytes, cloudForClass, cloudForSubject, deleteCloud, downloadCloud, friendlyCloudError, joinChunks, mimeOf,
+  CHUNK_BYTES, CLOUD_MAX_BYTES, checkCloudUpload, cloudBytes, cloudForClass, cloudForSubject, deleteCloud, downloadCloud, fileViewerHref, friendlyCloudError, joinChunks, mimeOf,
   newFileId, parseCloudIndex, partId, splitChunks, toClassFile, uploadCloud, type CloudEntry, type CloudStore
 } from '../src/lib/core/cloud-library';
 
@@ -50,6 +50,13 @@ describe('newFileId', () => {
   it('is safe in a Firestore field path and starts with a letter', () => {
     for (let i = 0; i < 50; i++) expect(newFileId()).toMatch(/^f[a-z0-9]{16}$/);
     expect(newFileId()).not.toBe(newFileId());
+  });
+});
+
+describe('file viewer URL', () => {
+  it('encodes the Firestore file id in the in-site viewer link', () => {
+    expect(fileViewerHref('fabc123')).toBe('/class-library/file?id=fabc123');
+    expect(fileViewerHref('fabc/123')).toBe('/class-library/file?id=fabc%2F123');
   });
 });
 
