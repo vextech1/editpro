@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /library
+Disallow: /settings
+Disallow: /share-target
+
+Sitemap: https://editpro.site/sitemap.xml

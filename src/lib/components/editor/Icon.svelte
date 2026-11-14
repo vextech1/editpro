@@ -1,0 +1,26 @@
+<script lang="ts">
+  // Small line icons for the editor shell (24x24, drawn with the current text colour).
+  const PATHS: Record<string, string[]> = {
+    back: ['M15 5l-7 7 7 7'], undo: ['M9 14L4 9l5-5', 'M4 9h10a6 6 0 0 1 0 12h-3'], redo: ['M15 14l5-5-5-5', 'M20 9H10a6 6 0 0 0 0 12h3'],
+    crop: ['M6 2v14a2 2 0 0 0 2 2h14', 'M2 6h14a2 2 0 0 1 2 2v14'], adjust: ['M4 7h9', 'M17 7h3', 'M4 17h3', 'M11 17h9', 'M15 4v6', 'M9 14v6'],
+    rotate: ['M21 12a9 9 0 1 1-3-6.7', 'M21 4v5h-5'], flip: ['M12 3v18', 'M8 7L3 12l5 5V7z', 'M16 7l5 5-5 5V7z'],
+    pages: ['M8 3h9a1 1 0 0 1 1 1v13H8z', 'M5 7v13a1 1 0 0 0 1 1h10'],
+    tools: ['M4 4h7v7H4z', 'M13 4h7v7h-7z', 'M4 13h7v7H4z', 'M13 13h7v7h-7z'], download: ['M12 3v12', 'M7 11l5 5 5-5', 'M5 21h14'],
+    more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'], check: ['M5 12l5 5L20 7'],
+    resize: ['M4 14v6h6', 'M4 20l7-7', 'M20 10V4h-6', 'M20 4l-7 7'], round: ['M8 4h8a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4z'],
+    draw: ['M4 20l1-4L16 5l3 3L8 19l-4 1z', 'M14 7l3 3'], hide: ['M3 3l18 18', 'M10.6 6.1A9.8 9.8 0 0 1 12 6c5 0 8.5 4.2 9.5 6a12 12 0 0 1-2.2 2.9', 'M6.4 7.5A12 12 0 0 0 2.5 12c1 1.8 4.5 6 9.5 6a9.5 9.5 0 0 0 3.3-.6', 'M9.9 10a3 3 0 0 0 4.1 4.1'],
+    watermark: ['M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z'], frames: ['M3 3h18v18H3z', 'M7 7h10v10H7z'], export: ['M12 15V3', 'M7 8l5-5 5 5', 'M5 21h14'],
+    merge: ['M6 4l6 8', 'M18 4l-6 8', 'M12 12v8', 'M9 17l3 3 3-3'], split: ['M12 20v-8', 'M12 12L6 4', 'M12 12l6-8', 'M9 7L6 4 3 7'],
+    addimage: ['M3 8h14v13H3z', 'M3 18l4-4 4 4 2-2 4 4', 'M7 11h.01', 'M20 2v6', 'M17 5h6'],
+    pageimage: ['M4 5h16v14H4z', 'M4 16l5-5 4 4 2-2 5 5', 'M15 9.5h.01'],
+    extract: ['M6 3h9l4 4v14H6z', 'M15 3v4h4', 'M9 18l2.5-3 2 2 1.5-1.5 2 2.5', 'M10 11h.01'],
+    edit: ['M12 20h9', 'M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z'], add: ['M12 5v14', 'M5 12h14'], finish: ['M5 21V4', 'M5 4h11l-2 4 2 4H5'],
+    convert: ['M17 3l4 4-4 4', 'M21 7H8', 'M7 21l-4-4 4-4', 'M3 17h13'], search: ['M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z', 'M21 21l-4.3-4.3'],
+    compress: ['M4 14h6v6', 'M20 10h-6V4', 'M14 10l7-7', 'M3 21l7-7'], picker: ['M16 3l5 5-3 3-5-5z', 'M13 8L4 17v3h3l9-9'], text: ['M5 6h14', 'M5 12h14', 'M5 18h9'],
+    scan: ['M4 8V5a1 1 0 0 1 1-1h3', 'M16 4h3a1 1 0 0 1 1 1v3', 'M20 16v3a1 1 0 0 1-1 1h-3', 'M8 20H5a1 1 0 0 1-1-1v-3', 'M4 12h16']
+  };
+  let { name, size = 24 }: { name: keyof typeof PATHS | string; size?: number } = $props();
+</script>
+<svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" fill="none" stroke="currentColor" stroke-width={name === 'more' ? 3.2 : 1.9} stroke-linecap="round" stroke-linejoin="round">
+  {#each PATHS[name] ?? [] as d}<path {d} />{/each}
+</svg>

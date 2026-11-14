@@ -1,0 +1,1 @@
+try{var t=localStorage.getItem('editpro.theme');if(t==='dark'||t==='light'){document.documentElement.dataset.theme=t;var c=t==='dark'?'#0b1416':'#f3f5f4';var m=document.querySelectorAll('meta[name="theme-color"]');for(var i=0;i<m.length;i++)m[i].content=c}}catch(e){}

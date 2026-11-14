@@ -1,0 +1,81 @@
+name: Web deploy (Firebase Hosting)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npx svelte-kit sync
+      - name: Type check
+        run: npx svelte-check --tsconfig ./tsconfig.json
+      - name: Unit tests
+        run: npx vitest run
+      - name: Build
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: build
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write   # lets GitHub prove its identity to Google (no stored key needed)
+    env:
+      WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      WIF_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+    steps:
+      # Skip quietly (instead of failing) until the two repository variables below have been added
+      # (Settings > Secrets and variables > Actions > Variables).
+      - name: Check deploy config
+        id: gate
+        run: |
+          if [ -z "$WIF_PROVIDER" ] || [ -z "$WIF_SERVICE_ACCOUNT" ]; then
+            echo "::notice::GCP_WORKLOAD_IDENTITY_PROVIDER / GCP_SERVICE_ACCOUNT variables are not set - skipping deploy"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.go == 'true'
+      - uses: actions/download-artifact@v4
+        if: steps.gate.outputs.go == 'true'
+        with:
+          name: site
+          path: build
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go == 'true'
+        with:
+          node-version: 22
+      # Keyless sign-in to Google (Workload Identity Federation): works even when the organization blocks service account keys.
+      - uses: google-github-actions/auth@v3
+        if: steps.gate.outputs.go == 'true'
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - name: Deploy to Firebase Hosting
+        if: steps.gate.outputs.go == 'true'
+        run: npx --yes firebase-tools@latest deploy --only hosting --project editpro1 --non-interactive
+      # Tell IndexNow search engines (Bing, Yandex and others) which pages to look at. Google does not use IndexNow.
+      # The script reads the page list from build/sitemap.xml and the key from static/<key>.txt. A failed ping never fails the deploy.
+      - name: Notify IndexNow
+        if: steps.gate.outputs.go == 'true'
+        continue-on-error: true
+        run: node scripts/indexnow.mjs
