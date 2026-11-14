@@ -6,8 +6,8 @@ export function zipFiles(files: { name: string; bytes: Uint8Array }[]): Uint8Arr
   const entries: Record<string, Uint8Array> = {};
   for (const f of files) {
     const n = seen.get(f.name) ?? 0; seen.set(f.name, n + 1);
-    const dot = f.name.lastIndexOf('.');
-    entries[n === 0 ? f.name : `${f.name.slice(0, dot)}-${n + 1}${f.name.slice(dot)}`] = f.bytes;
+    const dot = f.name.lastIndexOf('.'), at = dot > 0 ? dot : f.name.length;   // no extension (or a leading dot): suffix goes at the end
+    entries[n === 0 ? f.name : `${f.name.slice(0, at)}-${n + 1}${f.name.slice(at)}`] = f.bytes;
   }
   return zipSync(entries, { level: 0 });
 }
