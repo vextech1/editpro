@@ -1,5 +1,6 @@
 // Shared, browser-safe logic for the Firestore-backed Class Library.
 import { SITE, abs } from '#lib/site.ts';
+import type { LibraryStructure } from './library-structure.ts';
 
 export type CategoryId = 'notes' | 'assignments' | 'past-papers' | 'other';
 export const CATEGORIES: { id: CategoryId; label: string }[] = [
@@ -84,4 +85,19 @@ export function libraryHref(section = '', cls = '', subject = ''): string {
   if (section && cls && subject) q.set('subject', subject);
   const s = q.toString();
   return `/class-library${s ? `?${s}` : ''}`;
+}
+
+/** "Secondary School" -> "secondary-school", to match a name typed into an old URL. */
+export function slugify(name: string): string {
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/** Finds the section (and, if given, the class inside it) whose name slugifies to the given slug(s). Case- and
+ *  punctuation-insensitive, so a renamed or re-punctuated section/class can still be found by its old link. */
+export function findBySlugs(structure: LibraryStructure, sectionSlug: string, classSlug = ''): { section: string; cls: string } | undefined {
+  const section = structure.find((s) => slugify(s.name) === sectionSlug);
+  if (!section) return undefined;
+  if (!classSlug) return { section: section.id, cls: '' };
+  const cls = section.classes.find((c) => slugify(c.name) === classSlug);
+  return cls ? { section: section.id, cls: cls.id } : { section: section.id, cls: '' };
 }
