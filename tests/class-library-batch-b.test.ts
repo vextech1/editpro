@@ -19,3 +19,14 @@ describe('downloadErrorMessage', () => {
     expect(downloadErrorMessage(new Error('boom'))).toMatch(/did not finish/);
   });
 });
+
+import { libraryHref } from '../src/lib/core/class-library';
+describe('libraryHref', () => {
+  it('builds each level and skips levels whose parent is missing', () => {
+    expect(libraryHref()).toBe('/class-library');
+    expect(libraryHref('fa')).toBe('/class-library?section=fa');
+    expect(libraryHref('fa', 'fb', 'fc')).toBe('/class-library?section=fa&class=fb&subject=fc');
+    expect(libraryHref('', 'fb', 'fc')).toBe('/class-library');
+    expect(libraryHref('fa', '', 'fc')).toBe('/class-library?section=fa');
+  });
+});

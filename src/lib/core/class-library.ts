@@ -75,3 +75,13 @@ export function fmtAdded(iso: string | undefined): string {
   const d = new Date(+m[1], +m[2] - 1, +m[3]);
   return d.getMonth() === +m[2] - 1 ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 }
+
+/** The Library address for a section, class or subject. Each level is only included when the one above it is. */
+export function libraryHref(section = '', cls = '', subject = ''): string {
+  const q = new URLSearchParams();
+  if (section) q.set('section', section);
+  if (section && cls) q.set('class', cls);
+  if (section && cls && subject) q.set('subject', subject);
+  const s = q.toString();
+  return `/class-library${s ? `?${s}` : ''}`;
+}
