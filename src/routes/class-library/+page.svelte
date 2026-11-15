@@ -91,7 +91,7 @@
   {/if}
   {#if visibleFiles.length}
     <ul class="rows">
-      {#each visibleFiles as f (f.id)}<ClassFileRow file={f} pagePath={f.classPath} classTitle={f.classTitle} classHref={f.classPath} />{/each}
+      {#each visibleFiles as f (f.id)}<ClassFileRow file={f} pagePath={f.classPath} />{/each}
     </ul>
   {:else}
     <div class="card empty"><p class="muted">No materials have been added to this subject yet.</p></div>

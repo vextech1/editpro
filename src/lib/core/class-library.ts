@@ -67,3 +67,11 @@ export function isRecent(added: string | undefined, now: number, days = 14): boo
 export function sortFiles<T extends { title: string; added?: string }>(files: T[]): T[] {
   return [...files].sort((a, b) => (b.added ?? '').localeCompare(a.added ?? '') || a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
 }
+
+/** "2026-11-01" as "1 Nov 2026" (in the visitor's language). Anything that is not a real date reads as nothing. */
+export function fmtAdded(iso: string | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso ?? '');
+  if (!m) return '';
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  return d.getMonth() === +m[2] - 1 ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+}

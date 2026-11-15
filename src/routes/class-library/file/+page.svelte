@@ -4,7 +4,7 @@
   import { sendTo } from '#lib/workspace.svelte.ts';
   import { fileViewerHref } from '#lib/core/cloud-library.ts';
   import { categoryLabel, shareLink } from '#lib/core/class-library.ts';
-  import { friendlyCloudError, mimeOf, type CloudFile } from '#lib/core/cloud-library.ts';
+  import { downloadErrorMessage, friendlyCloudError, mimeOf, type CloudFile } from '#lib/core/cloud-library.ts';
   import { fetchCloudFile, listCloudFiles, saveCloudFile } from '#lib/cloud/firebase.ts';
   import { fileKind } from '#lib/core/workspaces.ts';
   import { fmtBytes } from '#lib/core/format.ts';
@@ -74,7 +74,7 @@
         progress = total > 1 ? `Downloading ${Math.round((done / total) * 100)}%` : 'Preparing download…';
       });
     } catch (e) {
-      problem = friendlyCloudError((e as { code?: string })?.code, 'The download did not finish. Please try again.');
+      problem = downloadErrorMessage(e);
     } finally { busy = false; progress = ''; }
   }
 </script>
