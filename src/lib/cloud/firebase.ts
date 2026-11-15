@@ -119,6 +119,19 @@ export function listCloudFiles(): Promise<CloudFile[]> {
 }
 export const forgetCloudList = (): void => { listing = undefined; };
 
+/**
+ * Everything the Library page shows, in one go. Unlike listCloudFiles, a failure is thrown, so the page can tell
+ * "could not load" apart from "the Library really is empty". `partial` means some index parts could not be read.
+ */
+export async function loadLibraryData(): Promise<{ files: CloudFile[]; structure: LibraryStructure; partial: boolean }> {
+  const { fs, db } = await reader();
+  const [{ files, failed }, structure] = await Promise.all([
+    readIndex(async (name) => (await fs.getDoc(fs.doc(db, 'library', name))).data()),
+    fs.getDoc(fs.doc(db, ...STRUCTURE))
+  ]);
+  return { files, structure: parseLibraryStructure(structure.data()), partial: failed > 0 };
+}
+
 export async function getLibraryStructure(): Promise<LibraryStructure> {
   if (!cloudEnabled()) return [];
   try {

@@ -62,3 +62,8 @@ export function isRecent(added: string | undefined, now: number, days = 14): boo
   const t = Date.parse(added + 'T00:00:00Z');
   return Number.isFinite(t) && now - t >= 0 && now - t < (days + 1) * 86400000;
 }
+
+/** Newest first, then by name with numbers in order ("Week 2" before "Week 10"), so the list does not shuffle between loads. */
+export function sortFiles<T extends { title: string; added?: string }>(files: T[]): T[] {
+  return [...files].sort((a, b) => (b.added ?? '').localeCompare(a.added ?? '') || a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
+}

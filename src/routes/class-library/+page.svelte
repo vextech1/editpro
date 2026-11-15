@@ -2,7 +2,7 @@
   import { page } from '$app/state';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { CATEGORIES, countLabel, filterFiles, type CategoryId } from '#lib/core/class-library.ts';
+  import { CATEGORIES, countLabel, filterFiles, sortFiles, type CategoryId } from '#lib/core/class-library.ts';
   import { toClassFile } from '#lib/core/cloud-library.ts';
   import { useCloud } from '#lib/cloud/useCloud.svelte.ts';
   import ClassFileRow from '#lib/components/ClassFileRow.svelte';
@@ -17,20 +17,26 @@
   const section = $derived(cloud.state.structure.find((item) => item.id === sectionId));
   const cls = $derived(section?.classes.find((item) => item.id === classId));
   const subject = $derived(cls?.subjects.find((item) => item.id === subjectId));
-  const libraryFiles = $derived(cloud.state.files.flatMap((file) => {
-    if (!file.subject) return [];
+  /** Every uploaded file that belongs somewhere in the catalog, newest first. A file with no subject (uploaded for the class as a whole,
+   *  or its subject was removed) is kept at the class level, not dropped. */
+  const libraryFiles = $derived(sortFiles(cloud.state.files.flatMap((file) => {
     const parent = cloud.state.structure.find((item) => item.id === file.section);
     const group = parent?.classes.find((item) => item.id === file.cls);
-    const topic = group?.subjects.find((item) => item.id === file.subject);
-    if (!parent || !group || !topic) return [];
-    const path = browseHref(parent.id, group.id, topic.id);
-    return [{ ...toClassFile(file), classPath: path, classTitle: `${parent.name} / ${group.name} / ${topic.name}` }];
-  }));
-  const subjectFiles = $derived(libraryFiles.filter((file) => file.cloud && cloud.state.files.find((entry) => `cloud/${entry.id}` === file.id && entry.section === sectionId && entry.cls === classId && entry.subject === subjectId)));
+    if (!parent || !group) return [];
+    const topic = file.subject ? group.subjects.find((item) => item.id === file.subject) : undefined;
+    return [{
+      ...toClassFile(file), sectionId: parent.id, classId: group.id, subjectId: topic?.id ?? '',
+      classPath: browseHref(parent.id, group.id, topic?.id),
+      classTitle: [parent.name, group.name, topic?.name].filter(Boolean).join(' / ')
+    }];
+  })));
+  const subjectFiles = $derived(libraryFiles.filter((f) => f.sectionId === sectionId && f.classId === classId && f.subjectId === subjectId));
+  const classLevelFiles = $derived(libraryFiles.filter((f) => f.sectionId === sectionId && f.classId === classId && !f.subjectId));
   const visibleFiles = $derived(subjectFiles.filter((file) => category === 'all' || file.category === category));
   const categoryCounts = $derived(CATEGORIES.map((item) => ({ ...item, count: subjectFiles.filter((file) => file.category === item.id).length })));
   const hits = $derived(filterFiles(libraryFiles, { text, extra: (file) => file.classTitle }));
 
+  const offline = $derived(typeof navigator !== 'undefined' && !navigator.onLine);
   function browseHref(section = '', cls = '', subject = '') {
     const query = new URLSearchParams();
     if (section) query.set('section', section);
@@ -55,13 +61,23 @@
 <label class="sr" for="lib-search">Search all materials</label>
 <input id="lib-search" class="search" type="search" bind:value={text} placeholder="Search everything, e.g. mathematics notes" />
 
+{#if !cloud.state.loaded && cloud.state.failed}
+  <div class="card empty" role="alert">
+    <h2>Couldn’t load the Library</h2>
+    <p class="muted">{offline ? 'You appear to be offline. Connect to the internet and try again.' : 'Check your internet connection and try again.'}</p>
+    <button class="btn" type="button" onclick={cloud.load}>Try again</button>
+  </div>
+{:else if !cloud.state.loaded}
+  <p class="muted" role="status">Loading Library…</p>
+{:else}
+{#if cloud.state.stale}
+  <p class="muted" role="status">{cloud.state.stale === 'saved' ? 'Showing the list saved on this device, because the latest one could not be loaded.' : 'Some files may be missing, because part of the list could not be loaded.'} <button class="link" type="button" onclick={cloud.load}>Try again</button></p>
+{/if}
 {#if text.trim()}
   <p role="status" class="muted">{countLabel(hits.length)} found</p>
   <ul class="rows">
     {#each hits as f (f.id)}<ClassFileRow file={f} pagePath={f.classPath} classTitle={f.classTitle} classHref={f.classPath} />{/each}
   </ul>
-{:else if !cloud.state.loaded}
-  <p class="muted">Loading Library…</p>
 {:else if subject}
   <p class="back"><a href={browseHref(sectionId)}>{section?.name}</a> / <a href={browseHref(sectionId, classId)}>{cls?.name}</a></p>
   <h2>{subject.name}</h2>
@@ -89,8 +105,14 @@
         <button class="card subject" type="button" onclick={() => openSubject(item.id)}><h3>{item.name}</h3></button>
       {/each}
     </div>
-  {:else}
+  {:else if !classLevelFiles.length}
     <div class="card empty"><p class="muted">No subjects have been added to this class yet.</p></div>
+  {/if}
+  {#if classLevelFiles.length}
+    <h3 class="sub-h">{cls.subjects.length ? 'Other materials for this class' : 'Materials'}</h3>
+    <ul class="rows">
+      {#each classLevelFiles as f (f.id)}<ClassFileRow file={f} pagePath={f.classPath} />{/each}
+    </ul>
   {/if}
 {:else if section}
   <p class="back"><a href="/class-library">← All sections</a></p>
@@ -116,6 +138,7 @@
     <p class="muted">Materials will appear here as they are added.</p>
   </div>
 {/if}
+{/if}
 
 <ClassRequest className={subject?.name ?? cls?.name ?? section?.name} />
 
@@ -130,6 +153,7 @@
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
   .chips button { font: inherit; font-size: .92rem; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
   .chips button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 650; }
+  .sub-h { margin: 22px 0 0; }
   .empty { text-align: center; padding: 32px 18px; }
   .empty h2 { margin-top: 0; }
 </style>
