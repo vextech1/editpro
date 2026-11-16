@@ -1,18 +1,23 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { deleteFileRecord, getUserUploadsOpen, listStudentFiles, previewStudentFile, pullFile, retryFilePieces, setUserUploadsOpen } from '#lib/cloud/moderation.ts';
+  import { deleteFileRecord, getUserUploadsOpen, listStudentFiles, previewStudentFile, pullFile, retryFilePieces, setUserUploadsOpen, studentUsage } from '#lib/cloud/moderation.ts';
   import { REASON_CHOICES, checkReason } from '#lib/core/moderation.ts';
   import { categoryLabel } from '#lib/core/class-library.ts';
   import { fmtBytes } from '#lib/core/format.ts';
   import type { UserFile, UserFileStatus } from '#lib/core/user-library.ts';
 
+  /** Called with how much room the live student documents take, so the admin page can count them in its storage meter. */
+  let { onUsage }: { onUsage?: (u: { bytes: number; count: number }) => void } = $props();
   let tab = $state<UserFileStatus>('live'); let files = $state<UserFile[]>([]); let loading = $state(true); let busy = $state(false);
   let uploadsOpen = $state(true); let problem = $state(''); let note = $state(''); let pulling = $state<UserFile>(); let reason = $state('');
   let preview = $state<{ id: string; url: string; text: string; kind: string }>();
   const tabs: { id: UserFileStatus; label: string }[] = [{ id: 'live', label: 'Live' }, { id: 'pulled', label: 'Pulled' }, { id: 'uploading', label: 'Unfinished' }];
   async function refresh() {
     loading = true; problem = '';
-    try { [files, uploadsOpen] = await Promise.all([listStudentFiles(tab), getUserUploadsOpen()]); }
+    try {
+      const [found, open, usage] = await Promise.all([listStudentFiles(tab), getUserUploadsOpen(), studentUsage()]);
+      files = found; uploadsOpen = open; onUsage?.(usage);
+    }
     catch { problem = 'Student documents could not be loaded. Check Firebase permissions and try again.'; }
     finally { loading = false; }
   }

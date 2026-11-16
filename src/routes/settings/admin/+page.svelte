@@ -5,7 +5,7 @@
   import { ALLOWED_EXT, CATEGORIES, type CategoryId } from '#lib/core/class-library.ts';
   import {
     CLOUD_MAX_BYTES, SPARK_STORAGE_BYTES, checkCloudUpload, checkStorage, chooseShard, cloudForSubject, deleteCloud, deleteTree, duplicateOf, emptyTrash,
-    entryBytesFor, friendlyCloudError, sameNameAs, storageUsed, uploadCloud, type CloudFile, type TrashItem
+    ENTRY_OVERHEAD_BYTES, PART_OVERHEAD_BYTES, entryBytesFor, friendlyCloudError, sameNameAs, storageUsed, uploadCloud, type CloudFile, type TrashItem
   } from '#lib/core/cloud-library.ts';
   import { isValidEmail, normalizeEmail } from '#lib/core/admins.ts';
   import {
@@ -24,6 +24,8 @@
   let ready = $state(false);
   let all = $state<CloudFile[]>([]);
   let shardSizes = $state<number[]>([0]);       // bytes used in each index document, so a new file goes where there is room
+  // What the live student documents take of the shared free storage, so the meter and the room check count them too.
+  let studentTotals = $state({ bytes: 0, count: 0 });
   let trashItems = $state<TrashItem[]>([]);     // pieces that may still need deleting (they still use storage)
   let helpers = $state<string[] | null>(null);  // the helper admins; null for anyone but the owner
   let newAdmin = $state('');
@@ -48,7 +50,7 @@
   const catLabel = $derived(CATEGORIES.find((c) => c.id === category)?.label ?? '');
   const checks = $derived(picked.map((f) => ({ file: f, result: checkCloudUpload(f.name, f.size) })));
   const good = $derived(checks.filter((c) => c.result.ok).map((c) => c.file));
-  const used = $derived(storageUsed(all, trashItems));
+  const used = $derived(storageUsed(all, trashItems) + studentTotals.bytes + studentTotals.count * (ENTRY_OVERHEAD_BYTES + 2 * PART_OVERHEAD_BYTES));
 
   const fail = (e: unknown) => { problem = friendlyCloudError((e as { code?: string })?.code, ''); note = ''; };
   const countIn = (id: CategoryId) => inSubject.filter((file) => file.category === id).length;
@@ -58,6 +60,13 @@
     const [index, sections, trash] = await Promise.all([adminList(), adminLibraryStructure(), adminTrash().catch(() => trashItems)]);
     all = index.files; shardSizes = index.shardSizes.length ? index.shardSizes : [0]; structure = sections; trashItems = trash; forgetCloudList();
     void tidy();
+  }
+
+  /** Reads the Library fresh, so a change made from another device is seen before anything is added or deleted here. */
+  async function freshIndex() {
+    const index = await adminList();
+    all = index.files; shardSizes = index.shardSizes.length ? index.shardSizes : [0];
+    return index;
   }
 
   /** Once per visit: remove pieces left behind by an upload or delete that was cut short. Files that are still listed are never touched. */
@@ -134,12 +143,18 @@
   async function removeLevel(level: 'section' | 'class' | 'subject') {
     const target = level === 'section' ? section : level === 'class' ? cls : subject;
     if (!target) return;
-    const victims = all.filter((file) => file.section === sectionId
-      && (level === 'section' || file.cls === classId)
-      && (level !== 'subject' || file.subject === subjectId));
+    busy = true; step = 'Checking the Library'; note = ''; problem = '';
+    let victims: CloudFile[];
+    try {
+      // Files added from another device must be included, or they would be left behind with no section.
+      const index = await freshIndex();
+      victims = index.files.filter((file) => file.section === sectionId
+        && (level === 'section' || file.cls === classId)
+        && (level !== 'subject' || file.subject === subjectId));
+    } catch (e) { fail(e); busy = false; step = ''; return; }
     const detail = victims.length ? ` This also permanently deletes ${victims.length} uploaded ${victims.length === 1 ? 'file' : 'files'}.` : '';
-    if (!confirm(`Delete ${level} “${target.name}” and everything inside it?${detail}`)) return;
-    busy = true; step = 'Deleting'; note = ''; problem = '';
+    if (!confirm(`Delete ${level} “${target.name}” and everything inside it?${detail}`)) { busy = false; step = ''; return; }
+    step = 'Deleting';
     try {
       const next = level === 'section' ? deleteSection(structure, sectionId)
         : level === 'class' ? deleteClass(structure, sectionId, classId)
@@ -159,15 +174,17 @@
 
   async function upload() {
     if (!good.length || !subject) return;
+    busy = true; step = 'Checking the Library'; problem = ''; note = '';
+    // The Library is read fresh first: a file added or replaced from another device must count for the room check and the replace check.
+    try { await freshIndex(); } catch (e) { fail(e); busy = false; step = ''; return; }
     // Two picked files whose names differ only in capitals would replace each other, so the later one is left out.
     const repeat = duplicateOf(good.map((f) => f.name));
     const batch = good.filter((_, i) => repeat[i] === null);
     const skipped = good.length - batch.length;
     const room = checkStorage(used, batch.map((f) => f.size));
-    if (!room.ok) { problem = room.reason; note = ''; return; }
+    if (!room.ok) { problem = room.reason; note = ''; busy = false; step = ''; return; }
     const same = batch.filter((f) => sameNameAs(files, f.name).length);
-    if (same.length && !confirm(`${same.map((f) => f.name).join(', ')} already ${same.length === 1 ? 'exists' : 'exist'} here. Replace ${same.length === 1 ? 'it' : 'them'}?`)) return;
-    busy = true; problem = ''; note = '';
+    if (same.length && !confirm(`${same.map((f) => f.name).join(', ')} already ${same.length === 1 ? 'exists' : 'exist'} here. Replace ${same.length === 1 ? 'it' : 'them'}?`)) { busy = false; step = ''; return; }
     let added = 0;
     try {
       const store = await adminStore();
@@ -194,7 +211,12 @@
   async function remove(f: CloudFile) {
     if (!confirm(`Delete "${f.title}" from ${subject?.name} › ${catLabel}? Students will not be able to download it any more.`)) return;
     busy = true; problem = ''; note = ''; step = 'Deleting';
-    try { await deleteCloud(await adminStore(), f.id, f.parts, f.shard ?? 0); note = `Deleted ${f.title}.`; }
+    try {
+      // A fresh look first: if it was already deleted from another device there is nothing to do, and the part count comes from the real entry.
+      const current = (await freshIndex()).files.find((x) => x.id === f.id);
+      if (current) { await deleteCloud(await adminStore(), current.id, current.parts, current.shard ?? 0); note = `Deleted ${f.title}.`; }
+      else note = `${f.title} was already deleted.`;
+    }
     catch (e) { fail(e); }
     finally { try { await refresh(); } catch { /* keep the last list */ } busy = false; step = ''; }
   }
@@ -222,7 +244,7 @@
     </section>
   {:else}
     <div class="who">Signed in as <strong>{session.email}</strong> · <button class="link" type="button" onclick={signOut}>Sign out</button></div>
-    <StudentModeration />
+    <StudentModeration onUsage={(u) => (studentTotals = u)} />
     <h2>Library structure</h2>
     <div class="hierarchy">
       <section class="level">

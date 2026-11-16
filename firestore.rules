@@ -8,7 +8,7 @@ service cloud.firestore {
     function isOwner() {
       return request.auth != null
         && request.auth.token.email_verified == true
-        && request.auth.token.email in ['andereya8@gmail.com'];
+        && request.auth.token.email in ['info@editpro.site'];
     }
 
     // The owner, or a helper in either collection (admins is retained for existing deployments).

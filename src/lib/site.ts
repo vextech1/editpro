@@ -4,7 +4,7 @@ export const SITE = {
   // Canonical public origin; Firebase Hosting must have this custom domain connected.
   origin: 'https://editpro.site',
   tagline: 'Edit PDFs and photos on the go. Scan, convert, frame and more.',
-  contactEmail: 'andereya8@gmail.com',
+  contactEmail: 'info@editpro.site',
   // Digits only, with the country code and no plus sign: the Class Library's WhatsApp requests go here (wa.me format).
   whatsapp: '255777167369',
   // Firebase web app settings, from Firebase console > Project settings > Your apps > Web app. They are not secret (anyone can see them in
