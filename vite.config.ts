@@ -37,5 +37,10 @@ export default defineConfig({
       }
     })
   ],
+  build: {
+    rolldownOptions: {
+      checks: { bundlerTimings: false }
+    }
+  },
   test: { include: ['tests/**/*.test.ts'], environment: 'node', testTimeout: 30000 }
 });
