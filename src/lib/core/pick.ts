@@ -1,3 +1,5 @@
+import { inferType } from './image-errors.ts';
+
 function matchesAccept(type: string, accept: string): boolean {
   return accept.split(',').some((entry) => {
     const accepted = entry.trim();
@@ -7,7 +9,7 @@ function matchesAccept(type: string, accept: string): boolean {
 
 export async function screenFiles(files: File[], accept: string): Promise<{ files: File[]; skipped: File[] }> {
   const accepted: File[] = [], skipped: File[] = [];
-  for (const file of files) (matchesAccept(file.type, accept) ? accepted : skipped).push(file);
+  for (const file of files) (matchesAccept(inferType(file.name, file.type), accept) ? accepted : skipped).push(file);
   return { files: accepted, skipped };
 }
 

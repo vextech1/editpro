@@ -18,7 +18,9 @@ export interface ClassFile {
   id: string; name: string; title: string; size: number; ext: string; category: CategoryId;
   /** YYYY-MM-DD. */
   added?: string;
-  cloud: { id: string; parts: number };
+  cloud: { id: string; parts: number; user?: boolean };
+  uploader?: string;
+  student?: boolean;
 }
 
 /** "database-systems_week-3.pdf" becomes "Database Systems Week 3". Words with capitals in them are left alone. */

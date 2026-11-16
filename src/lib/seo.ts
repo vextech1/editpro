@@ -60,7 +60,7 @@ export const pageMeta: Record<string, PageMeta> = {
   },
   '/class-library': {
     title: `Library: free class notes and past papers${TAIL}`,
-    description: 'Browse and download free class notes, assignments and past papers for your course. No sign-up. Missing a file? Ask for it on WhatsApp or email.'
+    description: 'Browse free class notes, assignments and past papers. First download is free; share a study document for more. Missing a file? Ask us.'
   },
   '/contact': {
     title: `Contact ${SITE.name}: support and feedback`,

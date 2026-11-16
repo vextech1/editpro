@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { imageFailed } from '#lib/image-failure.ts';
   import { onMount } from 'svelte';
   import FileDrop from './FileDrop.svelte';
   import BatchResults from './BatchResults.svelte';
@@ -14,7 +15,7 @@
   interface Row { name: string; filename: string; url?: string; bytes?: number; note?: string; blob?: Blob }
   let files = $state<File[]>([]);
   let sample = $state.raw<HTMLCanvasElement | null>(null);      // first photo, small, for the preview
-  let kind = $state<'text' | 'logo'>('text'), text = $state(''), color = $state('#ffffff'), outline = $state(true);
+  let kind = $state<'text' | 'logo'>('text'), text = $state('© Your name'), color = $state('#ffffff'), outline = $state(true);
   let logo = $state.raw<HTMLCanvasElement | null>(null); let logoName = $state('');
   let pos = $state<Pos>('br'), sizePct = $state(30), opacity = $state(60), angle = $state(0), margin = $state(3), gap = $state(60);
   let fmt = $state('keep'), quality = $state(92);
@@ -27,10 +28,10 @@
   onMount(() => () => reset());   // free the result files when the tool is closed
   async function pick(f: File[]) {
     reset(); files = f; sample = null;
-    try { sample = await loadCanvas(f[0], PREVIEW, true); } catch { status = 'The first file could not be read as an image.'; bad = true; }
+    try { sample = await loadCanvas(f[0], PREVIEW, true); } catch (error) { status = await imageFailed(error, f[0]); bad = true; }
   }
   async function pickLogo(f: File[]) {
-    try { logo = await loadCanvas(f[0], 1000); logoName = f[0].name; status = ''; bad = false; } catch { status = 'That logo could not be read as an image.'; bad = true; }
+    try { logo = await loadCanvas(f[0], 1000); logoName = f[0].name; status = ''; bad = false; } catch (error) { status = await imageFailed(error, f[0]); bad = true; }
   }
 
   /** The mark as its own transparent picture, so it can be scaled, rotated and repeated cheaply. */
@@ -80,7 +81,7 @@
     reset(); busy = true;
     for (let i = 0; i < files.length; i++) {
       status = `Working on ${i + 1} of ${files.length}…`;
-      try { results.push(await one(files[i])); } catch { results.push({ name: files[i].name, filename: '', note: 'This file could not be watermarked. It may not be an image.' }); }
+      try { results.push(await one(files[i])); } catch (error) { results.push({ name: files[i].name, filename: '', note: await imageFailed(error, files[i]) }); }
     }
     const done = results.filter((r) => r.blob);
     if (done.length > 1) {
@@ -103,7 +104,7 @@
 <div class="controls">
   <label>Type<select bind:value={kind}><option value="text">Text</option><option value="logo">Logo or picture</option></select></label>
   {#if kind === 'text'}
-    <label>Text<textarea rows="2" placeholder="Type your name, for example © Jane 2026" bind:value={text}></textarea></label>
+    <label>Text<textarea rows="2" bind:value={text}></textarea></label>
     <label>Text colour<input type="color" bind:value={color} /></label>
     <label class="chk"><input type="checkbox" bind:checked={outline} /> Thin outline so it stays readable</label>
   {/if}

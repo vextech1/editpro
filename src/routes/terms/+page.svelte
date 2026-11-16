@@ -5,7 +5,7 @@
 <svelte:head><title>{pageMeta['/terms'].title}</title><meta name="description" content={pageMeta['/terms'].description} /></svelte:head>
 <article class="prose">
 <h1>Terms of use</h1>
-<p class="meta">Last updated: November 3, 2026</p>
+<p class="meta">Last updated: November 16, 2026</p>
 
 <p>By using the EditPro website you agree to these terms. If you do not agree, please do not use the site.</p>
 
@@ -13,10 +13,10 @@
 <p>EditPro provides free tools to scan, convert, compress and edit documents and images in your browser. No account is needed.</p>
 
 <h2>2. Your content</h2>
-<p>Your files remain yours and are processed on your device. You are responsible for the files you process and for having the right to use them. We do not claim any rights over your content.</p>
+<p>Files you process with the tools remain yours and are processed on your device. If you choose to share a study document in the Class Library, you confirm that you have the right to share it publicly and that it does not contain private or unlawful material. You keep ownership and grant EditPro a non-exclusive permission to store, display and distribute that document as part of the public Library. You may delete your shared document or account using My account. We may remove a shared document that is reported or does not meet these terms.</p>
 
 <h2>3. Acceptable use</h2>
-<p>Do not use the site to break the law, to infringe other people’s rights, to attempt to disrupt or reverse engineer the service, or to process content you are not allowed to handle.</p>
+<p>Do not use the site to break the law, to infringe other people’s rights, to attempt to disrupt or reverse engineer the service, or to process or share content you are not allowed to handle. Do not upload personal records, copyrighted material you lack permission to distribute, malware or misleading files.</p>
 
 <h2>4. No warranty</h2>
 <p>The site is provided “as is”. Conversions, compression, page detection and text recognition may contain errors, so please keep a copy of important originals and check the results. Files saved in My files live in your browser and can be lost if you clear site data, so download anything you cannot afford to lose. We do not promise that the site will always be available or error-free.</p>

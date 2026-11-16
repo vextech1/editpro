@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { imageFailed } from '#lib/image-failure.ts';
   import FileDrop from './FileDrop.svelte';
   import { loadCanvas } from '#lib/core/download.ts';
   import { extractPalette, hexToRgb, rgbToHsl, textOn, toHex } from '#lib/core/palette.ts';
@@ -19,7 +20,7 @@
       c.getContext('2d', { willReadFrequently: true })!.drawImage(loaded, 0, 0); loaded.width = 0; src = c;
       palette = extractPalette(c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data, 6);
       if (palette[0]) cur = palette[0];
-    } catch { msg = 'That file could not be read as an image.'; }
+    } catch (error) { msg = await imageFailed(error, f[0]); }
   }
   $effect(() => {
     const s = src, m = mark; if (!s || !view) return;

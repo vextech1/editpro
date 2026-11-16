@@ -6,11 +6,18 @@
   import { categoryLabel, shareLink } from '#lib/core/class-library.ts';
   import { downloadErrorMessage, friendlyCloudError, mimeOf, type CloudFile } from '#lib/core/cloud-library.ts';
   import { fetchCloudFile, listCloudFiles, saveCloudFile } from '#lib/cloud/firebase.ts';
+  import { getUserFile } from '#lib/cloud/user.ts';
+  import { requestAccess } from '#lib/cloud/member.svelte.ts';
+  import { reportHref } from '#lib/core/moderation.ts';
+  import { SITE } from '#lib/site.ts';
+  import AccessGate from '#lib/components/AccessGate.svelte';
   import { fileKind } from '#lib/core/workspaces.ts';
   import { fmtBytes } from '#lib/core/format.ts';
   let { data } = $props();
 
-  let file = $state<CloudFile>();
+  type ViewFile = CloudFile & { user?: boolean; uploader?: string };
+  let file = $state<ViewFile>();
+  let locked = $state(false);
   let content = $state<Blob>();
   let previewUrl = $state('');
   let textPreview = $state('');
@@ -36,10 +43,22 @@
 
   async function loadFile(id: string, loadId: number) {
     try {
-      const entry = (await listCloudFiles()).find((item) => item.id === id);
+      locked = false;
+      let entry: ViewFile | undefined = (await listCloudFiles()).find((item) => item.id === id);
       if (loadId !== generation) return;
+      if (!entry) {
+        const shared = await getUserFile(id);
+        if (loadId !== generation) return;
+        if (shared?.status === 'pulled') throw new Error(`This file was removed from the Library.${shared.pulledReason ? ` Reason: ${shared.pulledReason}` : ''}`);
+        if (shared?.status === 'live') entry = { ...shared, user: true };
+      }
       if (!entry) throw new Error('This Library file could not be found. It may have been removed.');
-      const blob = await fetchCloudFile({ name: entry.name, ext: entry.ext, size: entry.size, cloud: { id: entry.id, parts: entry.parts } });
+      if (!(await requestAccess({ id: entry.id, title: entry.title, uploader: entry.uploader }, () => void loadFile(id, loadId)))) {
+        if (loadId !== generation) return;
+        file = entry; locked = true; loading = false; return;
+      }
+      if (loadId !== generation) return;
+      const blob = await fetchCloudFile({ name: entry.name, ext: entry.ext, size: entry.size, cloud: { id: entry.id, parts: entry.parts, user: entry.user } });
       if (loadId !== generation) return;
       file = entry;
       content = blob;
@@ -70,7 +89,7 @@
     if (!file || busy) return;
     busy = true; progress = 'Preparing download…'; problem = '';
     try {
-      await saveCloudFile({ name: file.name, ext: file.ext, size: file.size, cloud: { id: file.id, parts: file.parts } }, (done, total) => {
+      await saveCloudFile({ name: file.name, ext: file.ext, size: file.size, cloud: { id: file.id, parts: file.parts, user: file.user } }, (done, total) => {
         progress = total > 1 ? `Downloading ${Math.round((done / total) * 100)}%` : 'Preparing download…';
       });
     } catch (e) {
@@ -89,12 +108,20 @@
   <p role="status" class="muted">Opening file…</p>
 {:else if problem && !file}
   <section class="card empty"><h1>File unavailable</h1><p role="alert" class="warn">{problem}</p></section>
+{:else if file && locked}
+  <section class="card empty">
+    <p class="eyebrow">{categoryLabel(file.category)} · {file.ext.toUpperCase()} · {fmtBytes(file.size)}</p>
+    <h1>{file.title}</h1>
+    <p class="muted">Your first download is free. To open more files, sign in with Google and share a study document to unlock more downloads.</p>
+    <button class="btn" type="button" onclick={() => { loading = true; void loadFile(file!.id, ++generation); }}>Continue</button>
+  </section>
 {:else if file}
   <div class="file-head">
     <div class="file-title"><p class="eyebrow">{categoryLabel(file.category)} · {file.ext.toUpperCase()} · {fmtBytes(file.size)}</p><h1>{file.title}</h1></div>
     <div class="actions">
       <button class="btn small" type="button" onclick={editFile} disabled={!kind || busy || !content} title={kind ? `Edit in ${studio}` : 'Studio editing is available for PDFs and images'}>{busy ? 'Working…' : kind ? `Edit in ${studio}` : 'Edit unavailable'}</button>
       <a class="btn small ghost" href={shareHref} target="_blank" rel="noopener noreferrer">Share</a>
+      {#if file.user}<a class="btn small ghost" href={reportHref(SITE.contactEmail, { id: file.id, title: file.title })}>Report</a>{/if}
       <button class="btn small ghost" type="button" onclick={downloadFile} disabled={busy}>{progress || 'Download'}</button>
     </div>
   </div>
@@ -110,6 +137,7 @@
   {/if}
   {#if !kind}<p class="muted edit-note">Edit Studio currently supports PDF and image files.</p>{/if}
 {/if}
+<AccessGate />
 
 <style>
   .back { margin: 0 0 18px; }

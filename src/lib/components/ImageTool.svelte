@@ -3,6 +3,7 @@
   import FileDrop from './FileDrop.svelte';
   import { baseName, fmtBytes, scaleTo } from '#lib/core/format.ts';
   import { draw, loadBitmap, toBlob } from '#lib/core/image.ts';
+  import { diagnoseImageFailure } from '#lib/core/image-errors.ts';
   import { readBytes, zipBlob } from '#lib/core/files.ts';
   import { zipFiles } from '#lib/core/zip.ts';
   import ResultRow from './ResultRow.svelte';
@@ -31,18 +32,29 @@
   async function one(file: File): Promise<Result> {
     const bmp = await loadBitmap(file);
     const s = scaleTo(bmp.width, bmp.height, max);
-    const canvas = draw(bmp, s.w, s.h, fmt === 'image/jpeg');
-    bmp.close();
-    const blob = await toBlob(canvas, fmt, quality / 100);
-    if (!blob) throw new Error('encode failed');
+    let blob: Blob | null = null; let scale = 1; let shrunk = false;
+    try {
+      for (let attempt = 0; ; attempt++) {
+        const w = Math.max(1, Math.round(s.w * scale)), h = Math.max(1, Math.round(s.h * scale));
+        let canvas: HTMLCanvasElement | undefined;
+        try {
+          canvas = draw(bmp, w, h, fmt === 'image/jpeg');
+          blob = await toBlob(canvas, fmt, quality / 100);
+          if (!blob) throw new Error('encode failed');
+          break;
+        } catch (error) {
+          if (attempt >= 2 || Math.max(w, h) <= 1024) throw error;
+          scale /= 2; shrunk = true;
+        } finally { if (canvas) canvas.width = canvas.height = 0; }
+      }
+    } finally { bmp.close(); }
+    const saved = blob!;
     const url = URL.createObjectURL(blob); urls.push(url);
+    const notes = [shrunk ? 'This photo was very large, so it was made smaller to fit this device.' : '', saved.type !== fmt ? `Your browser saved this as ${saved.type.replace('image/', '').toUpperCase()} instead.` : ''];
     return {
-      name: file.name, before: file.size, after: blob.size, url, blob,
-      filename: baseName(file.name) + (mode === 'compress' ? '-compressed.' : '.') + (EXT[blob.type] ?? 'img'),
-      note: [
-        blob.type !== fmt ? `Your browser saved this as ${blob.type.replace('image/', '').toUpperCase()} instead.` : '',
-        mode === 'compress' && blob.size >= file.size ? 'This is not smaller than the original. Try WebP, a lower quality, or a smaller longest side.' : ''
-      ].filter(Boolean).join(' ')
+      name: file.name, before: file.size, after: saved.size, url, blob: saved,
+      filename: baseName(file.name) + (mode === 'compress' ? '-compressed.' : '.') + (EXT[saved.type] ?? 'img'),
+      note: [...notes, mode === 'compress' && saved.size >= file.size ? 'This is not smaller than the original. Try WebP, a lower quality, or a smaller longest side.' : ''].filter(Boolean).join(' ')
     };
   }
 
@@ -51,7 +63,7 @@
     for (let i = 0; i < files.length; i++) {
       status = `Working on ${i + 1} of ${files.length}…`;
       try { results.push(await one(files[i])); }
-      catch { results.push({ name: files[i].name, note: 'This file could not be read as an image.' }); }
+      catch (error) { results.push({ name: files[i].name, note: (await diagnoseImageFailure(error, files[i])).message }); }
     }
     const done = results.filter((r) => r.blob);
     if (done.length > 1) {

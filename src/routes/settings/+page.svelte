@@ -10,7 +10,7 @@
   import { applyTheme, clearPrefs, getOcrLang, getTheme, setOcrLang, setTheme, getRetentionDays, setRetentionDays, RETENTION_CHOICES, type Theme } from '#lib/core/settings.ts';
 
   const themes: [Theme, string][] = [['system', 'System'], ['dark', 'Dark'], ['light', 'Light']];
-  const links = [['/settings/admin', 'Library admin', 'Add or delete Library files (site owner)'], ['/library?trash=1', 'Trash', 'Deleted files, kept for 30 days'], ['/faq', 'FAQ', 'Common questions'], ['/contact', 'Contact', 'Get in touch'],
+  const links = [['/settings/account', 'My account', 'Sign in, your shared documents and downloads'], ['/settings/admin', 'Library admin', 'Add or delete Library files (site owner)'], ['/library?trash=1', 'Trash', 'Deleted files, kept for 30 days'], ['/faq', 'FAQ', 'Common questions'], ['/contact', 'Contact', 'Get in touch'],
     ['/privacy', 'Privacy policy', ''], ['/terms', 'Terms of use', '']];
   let theme = $state<Theme>('system'); let lang = $state('eng');
   let used = $state(0); let quota = $state(0); let count = $state(0); let unavailable = $state(false); let note = $state('');

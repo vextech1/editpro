@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { imageFailed } from '#lib/image-failure.ts';
   import FileDrop from './FileDrop.svelte';
   import SaveButton from './SaveButton.svelte';
   import { baseName } from '#lib/core/format.ts';
@@ -19,7 +20,7 @@
 
   async function pick(f: File[]) {
     msg = ''; items = []; draft = null;
-    try { src = await loadCanvas(f[0], MAX_SIDE, true); name = f[0].name; } catch { msg = 'That file could not be read as an image.'; }
+    try { src = await loadCanvas(f[0], MAX_SIDE, true); name = f[0].name; } catch (error) { msg = await imageFailed(error, f[0]); }
   }
   $effect(() => {
     const s = src, all = draft ? [...items, draft] : [...items];

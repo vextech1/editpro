@@ -3,6 +3,7 @@
   import { getLibrary, matchesAccept } from '#lib/core/library.ts';
   import { takePending } from '#lib/core/handoff.ts';
   import { screenFiles, skippedMessage } from '#lib/core/pick.ts';
+  import { inferType } from '#lib/core/image-errors.ts';
   import { getStudio } from '#lib/workspace.svelte.ts';
   import LibraryPicker from './LibraryPicker.svelte';
   // `fromSession` is false for secondary pickers (a logo, say) that must not receive the working file.
@@ -18,7 +19,7 @@
   let picking = $state(false);
   let expired = $state(false); // true when files timed out in transit from home page
   let notice = $state('');     // which files were turned away, and why
-  const ok = (f: File) => matchesAccept(f.type, accept);
+  const ok = (f: File) => matchesAccept(inferType(f.name, f.type), accept);
   async function take(list: FileList | null) {
     // Copy the list now: the input is cleared right after this call, and a dropped list is only valid during the event.
     const { files, skipped } = await screenFiles(Array.from(list ?? []), accept);
@@ -33,7 +34,7 @@
     if (result.expired && !own.length) expired = true;
     const files = [...own, ...result.files];
     if (files.length) onfiles(multiple ? files : files.slice(0, 1));
-    try { getLibrary().list().then((l) => { saved = l.filter((f) => matchesAccept(f.type, accept)).length; }).catch(() => {}); } catch { /* storage unavailable */ }
+    try { getLibrary().list().then((l) => { saved = l.filter((f) => matchesAccept(inferType(f.name, f.type), accept)).length; }).catch(() => {}); } catch { /* storage unavailable */ }
   });
 </script>
 

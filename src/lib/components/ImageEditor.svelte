@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { imageFailed } from '#lib/image-failure.ts';
   import { onMount } from 'svelte';
   import FileDrop from './FileDrop.svelte';
   import SaveButton from './SaveButton.svelte';
@@ -67,7 +68,7 @@
       const bmp = await loadBitmap(f[0]); const k = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
       const c = draw(bmp, Math.round(bmp.width * k), Math.round(bmp.height * k), true); bmp.close();
       name = f[0].name; base = null; setBase(c, false); loaded = true;
-    } catch { msg = 'That file could not be read as an image.'; }
+    } catch (error) { msg = await imageFailed(error, f[0]); }
   }
 
   function transform(kind: 'left' | 'right' | 'flip') {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { imageFailed } from '#lib/image-failure.ts';
   import { onMount } from 'svelte';
   import CameraCapture from './CameraCapture.svelte';
   import CornerEditor from './CornerEditor.svelte';
@@ -52,9 +53,11 @@
   async function nextFromQueue() {
     const f = queue[0]; if (!f) { view = 'list'; return; }
     try {
-      const bmp = await loadBitmap(f); const k = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
-      const c = draw(bmp, Math.round(bmp.width * k), Math.round(bmp.height * k), true); bmp.close(); startDraft(c);
-    } catch { queue = queue.slice(1); bad = true; status = `“${f.name}” could not be read as an image.`; if (queue.length) await nextFromQueue(); else view = 'list'; }
+      const bmp = await loadBitmap(f); let c: HTMLCanvasElement | undefined;
+      try { const k = Math.min(1, 2400 / Math.max(bmp.width, bmp.height)); c = draw(bmp, Math.round(bmp.width * k), Math.round(bmp.height * k), true); }
+      finally { bmp.close(); }
+      startDraft(c!);
+    } catch (error) { queue = queue.slice(1); bad = true; status = await imageFailed(error, f); if (queue.length) await nextFromQueue(); else view = 'list'; }
   }
   function addFiles(files: File[]) { clearOuts(); queue = files; queueTotal = files.length; nextFromQueue(); }
 

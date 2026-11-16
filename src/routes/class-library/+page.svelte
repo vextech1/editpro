@@ -4,9 +4,13 @@
   import { onMount } from 'svelte';
   import { CATEGORIES, countLabel, filterFiles, libraryHref, sortFiles, type CategoryId } from '#lib/core/class-library.ts';
   import { toClassFile } from '#lib/core/cloud-library.ts';
+  import { listLiveUserFiles } from '#lib/cloud/user.ts';
+  import { openShare } from '#lib/cloud/member.svelte.ts';
+  import { toUserClassFile, type UserFile } from '#lib/core/user-library.ts';
   import { useCloud } from '#lib/cloud/useCloud.svelte.ts';
   import ClassFileRow from '#lib/components/ClassFileRow.svelte';
   import ClassRequest from '#lib/components/ClassRequest.svelte';
+  import AccessGate from '#lib/components/AccessGate.svelte';
   let { data } = $props();
   let text = $state('');
   let category = $state<CategoryId | 'all'>('all');
@@ -17,6 +21,16 @@
   const section = $derived(cloud.state.structure.find((item) => item.id === sectionId));
   const cls = $derived(section?.classes.find((item) => item.id === classId));
   const subject = $derived(cls?.subjects.find((item) => item.id === subjectId));
+  let studentFiles = $state<UserFile[]>([]);
+  let studentProblem = $state(''); let studentRetry = $state(0);
+  $effect(() => {
+    const attempt = studentRetry;
+    const section = sectionId, group = classId, topic = subjectId, searching = text.trim();
+    studentFiles = []; studentProblem = '';
+    void listLiveUserFiles(searching ? '' : section, searching ? '' : group, searching ? undefined : topic || undefined)
+      .then((files) => { if (attempt === studentRetry && section === sectionId && group === classId && topic === subjectId && searching === text.trim()) studentFiles = files; })
+      .catch(() => { if (attempt === studentRetry && section === sectionId && group === classId && topic === subjectId && searching === text.trim()) studentProblem = 'Student-shared files could not be loaded. The other Library files are still available.'; });
+  });
   /** Every uploaded file that belongs somewhere in the catalog, newest first. A file with no subject (uploaded for the class as a whole,
    *  or its subject was removed) is kept at the class level, not dropped. */
   const libraryFiles = $derived(sortFiles(cloud.state.files.flatMap((file) => {
@@ -30,14 +44,25 @@
       classTitle: [parent.name, group.name, topic?.name].filter(Boolean).join(' / ')
     }];
   })));
-  const subjectFiles = $derived(libraryFiles.filter((f) => f.sectionId === sectionId && f.classId === classId && f.subjectId === subjectId));
-  const classLevelFiles = $derived(libraryFiles.filter((f) => f.sectionId === sectionId && f.classId === classId && !f.subjectId));
+  const sharedFiles = $derived(studentFiles.map((file) => {
+    const parent = cloud.state.structure.find((item) => item.id === file.section);
+    const group = parent?.classes.find((item) => item.id === file.cls);
+    const topic = group?.subjects.find((item) => item.id === file.subject);
+    return {
+      ...toUserClassFile(file), sectionId: file.section, classId: file.cls, subjectId: topic?.id ?? '',
+      classPath: libraryHref(file.section, file.cls, topic?.id ?? ''),
+      classTitle: [parent?.name, group?.name, topic?.name].filter(Boolean).join(' / ')
+    };
+  }));
+  const allFiles = $derived(sortFiles([...libraryFiles, ...sharedFiles]));
+  const subjectFiles = $derived(allFiles.filter((f) => f.sectionId === sectionId && f.classId === classId && f.subjectId === subjectId));
+  const classLevelFiles = $derived(allFiles.filter((f) => f.sectionId === sectionId && f.classId === classId && !f.subjectId));
   const visibleFiles = $derived(subjectFiles.filter((file) => category === 'all' || file.category === category));
   const categoryCounts = $derived(CATEGORIES.map((item) => ({ ...item, count: subjectFiles.filter((file) => file.category === item.id).length })));
-  const hits = $derived(filterFiles(libraryFiles, { text, extra: (file) => file.classTitle }));
+  const hits = $derived(filterFiles(allFiles, { text, extra: (file) => file.classTitle }));
 
   const offline = $derived(typeof navigator !== 'undefined' && !navigator.onLine);
-  const filesIn = (s: string, c = '', t?: string) => libraryFiles.filter((f) => f.sectionId === s && (!c || f.classId === c) && (t === undefined || f.subjectId === t)).length;
+  const filesIn = (s: string, c = '', t?: string) => allFiles.filter((f) => f.sectionId === s && (!c || f.classId === c) && (t === undefined || f.subjectId === t)).length;
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const summary = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(' · ');
   const fileSummary = (n: number) => (n ? countLabel(n) : 'No files yet');
@@ -46,7 +71,7 @@
   // Each view has its own title and description, so a shared link and a browser tab say what they open.
   const heading = $derived(subject?.name ?? cls?.name ?? section?.name ?? '');
   const title = $derived(heading ? `${heading}${section && heading !== section.name ? ` (${section.name})` : ''}: class notes and past papers | ${SITE.name}` : data.meta.title);
-  const description = $derived(heading ? `Free class notes, assignments and past papers for ${heading}. No sign-up.` : data.meta.description);
+  const description = $derived(heading ? `Free class notes, assignments and past papers for ${heading}. First download is free; share a study document for more.` : data.meta.description);
 </script>
 
 <svelte:head>
@@ -64,7 +89,7 @@
 
 <p class="eyebrow">EDITPRO STUDENT RESOURCES</p>
 <h1>Library</h1>
-<p class="lede">Class notes, assignments and past papers, free to download. No sign-up.</p>
+<p class="lede">Class notes, assignments and past papers shared by EditPro and students. Your first download is free; after that, share a study document to unlock more. Other tools stay free.</p>
 
 <label class="sr" for="lib-search">Search all materials</label>
 <input id="lib-search" class="search" type="search" bind:value={text} placeholder="Search everything, e.g. mathematics notes" />
@@ -81,6 +106,7 @@
 {#if cloud.state.stale}
   <p class="muted" role="status">{cloud.state.stale === 'saved' ? 'Showing the list saved on this device, because the latest one could not be loaded.' : 'Some files may be missing, because part of the list could not be loaded.'} <button class="link" type="button" onclick={cloud.load}>Try again</button></p>
 {/if}
+{#if studentProblem}<p class="muted" role="status">{studentProblem} <button class="link" type="button" onclick={() => (studentRetry += 1)}>Try again</button></p>{/if}
 {#if missing}<p class="card note" role="status">That page is not in the Library any more. Here is the nearest one.</p>{/if}
 {#if text.trim()}
   <p role="status" class="muted">{countLabel(hits.length)} found</p>
@@ -90,6 +116,7 @@
 {:else if subject && section && cls}
   {@render crumbs()}
   <h2>{subject.name}</h2>
+  <p><button class="btn small" type="button" onclick={() => void openShare()}>Share a study document</button> <span class="muted">Each live document unlocks 3 downloads.</span></p>
   {#if categoryCounts.filter((item) => item.count).length > 1}
     <div class="chips" role="group" aria-label="Filter by category">
       <button type="button" class:on={category === 'all'} aria-pressed={category === 'all'} onclick={() => (category = 'all')}>All ({subjectFiles.length})</button>
@@ -150,6 +177,7 @@
 {/if}
 
 <ClassRequest className={subject?.name ?? cls?.name ?? section?.name} />
+<AccessGate />
 
 <style>
   .eyebrow { color: var(--accent); font-size: .76rem; font-weight: 750; letter-spacing: .1em; margin: 0 0 8px; }

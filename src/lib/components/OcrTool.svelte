@@ -3,6 +3,7 @@
   import FileDrop from './FileDrop.svelte';
   import { baseName } from '#lib/core/format.ts';
   import { draw, loadBitmap } from '#lib/core/image.ts';
+  import { diagnoseImageFailure, inferType } from '#lib/core/image-errors.ts';
   import { joinPages, createOcr, getCachedLangs, markLangCached, OCR_LANGS } from '#lib/core/ocr.ts';
   import { closePdf, openPdf, renderPage } from '#lib/core/pdf-render.ts';
   import { pdfErrorMessage, readBytes } from '#lib/core/files.ts';
@@ -36,9 +37,9 @@
       if (cancelled) return;   // closed while the engine was starting; `finally` shuts it down
       markLangCached(lang);
       for (let i = 0; i < files.length && !cancelled; i++) {
-        const f = files[i]; const pages: string[] = [];
+        const f = files[i]; const pages: string[] = []; const type = inferType(f.name, f.type);
         try {
-          if (f.type === 'application/pdf') {
+          if (type === 'application/pdf') {
             const doc = await openPdf(await readBytes(f));
             try {
               const n = Math.min(doc.numPages, MAX_PDF_PAGES);
@@ -53,11 +54,14 @@
           } else {
             status = `Reading ${f.name}…`;
             const bmp = await loadBitmap(f);
-            const k = Math.min(1, 3000 / Math.max(bmp.width, bmp.height));
-            const c = draw(bmp, Math.round(bmp.width * k), Math.round(bmp.height * k), true); bmp.close();
-            blocks.push({ name: f.name, text: (await ocr.read(c)).trim() }); c.width = c.height = 0;
+            let c: HTMLCanvasElement | undefined;
+            try {
+              const k = Math.min(1, 3000 / Math.max(bmp.width, bmp.height));
+              c = draw(bmp, Math.round(bmp.width * k), Math.round(bmp.height * k), true);
+              blocks.push({ name: f.name, text: (await ocr.read(c)).trim() });
+            } finally { bmp.close(); if (c) c.width = c.height = 0; }
           }
-        } catch (e) { blocks.push({ name: f.name, text: pdfErrorMessage(e, f.name), bad: true }); }
+        } catch (e) { blocks.push({ name: f.name, text: type === 'application/pdf' ? pdfErrorMessage(e, f.name) : (await diagnoseImageFailure(e, f)).message, bad: true }); }
       }
       status = 'Done.';
     } catch (e) {

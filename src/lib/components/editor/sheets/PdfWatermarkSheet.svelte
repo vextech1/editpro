@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { imageFailed } from '#lib/image-failure.ts';
   import ToolSheet from '../ToolSheet.svelte';
   import SliderRow from '../SliderRow.svelte';
   import ParamTabs from '../ParamTabs.svelte';
@@ -31,7 +32,7 @@
   async function pickLogo(e: Event & { currentTarget: HTMLInputElement }) {
     const input = e.currentTarget;   // the browser clears currentTarget once the handler has awaited, so keep our own reference
     const f = input.files?.[0]; if (!f) return;
-    try { logo = await loadCanvas(f, 1000); logoName = f.name; err = ''; } catch { err = 'That logo could not be read as an image.'; }
+    try { logo = await loadCanvas(f, 1000); logoName = f.name; err = ''; } catch (error) { err = await imageFailed(error, f); }
     input.value = '';
   }
   function reset() { Object.assign(draft, defaultDraft()); logo = null; logoName = ''; param = 'size'; err = ''; }

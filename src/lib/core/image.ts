@@ -1,9 +1,21 @@
 // Browser-only image helpers. Nothing here touches the network.
+import { HEAD_BYTES, HUGE_DECODE_SIDE, isHuge, readImageSize } from './image-size.ts';
 export interface Bitmap { width: number; height: number; source: CanvasImageSource; close: () => void }
 
 /** Decode an image file, honouring EXIF rotation where the browser supports it. */
 export async function loadBitmap(file: Blob): Promise<Bitmap> {
   if (typeof createImageBitmap === 'function') {
+    let size = null as ReturnType<typeof readImageSize>;
+    try { size = readImageSize(new Uint8Array(await file.slice(0, HEAD_BYTES).arrayBuffer())); } catch { /* use the browser decoder */ }
+    if (size && isHuge(size)) {
+      const resize = size.w >= size.h ? { resizeWidth: HUGE_DECODE_SIDE } : { resizeHeight: HUGE_DECODE_SIDE };
+      for (const opts of [{ ...resize, resizeQuality: 'high' as const, imageOrientation: 'from-image' as const }, { ...resize, resizeQuality: 'high' as const }]) {
+        try {
+          const b = await createImageBitmap(file, opts);
+          return { width: b.width, height: b.height, source: b, close: () => b.close() };
+        } catch { /* try full-size decoding below */ }
+      }
+    }
     for (const opts of [{ imageOrientation: 'from-image' as const }, undefined]) {
       try {
         const b = await createImageBitmap(file, opts);

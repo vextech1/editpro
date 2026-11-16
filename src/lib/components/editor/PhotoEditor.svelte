@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { imageFailed } from '#lib/image-failure.ts';
   import { onMount, untrack } from 'svelte';
   import { getStudio, openInStudio } from '#lib/workspace.svelte.ts';
   import { loadBitmap, draw, toBlob } from '#lib/core/image.ts';
@@ -124,7 +125,7 @@
       const old = base; if (prev) prev.width = 0; prev = small; base = c; W = c.width; H = c.height; if (old) old.width = 0;
       tool = null; outDims = null; adj = { ...NO_ADJUST }; crop = null; msg = afterMsg; afterMsg = ''; rev++;
       zoom = { scale: 1, x: 0, y: 0 };
-    } catch { if (mine === token) msg = 'That file could not be read as an image.'; }
+    } catch (error) { if (mine === token) msg = await imageFailed(error, f); }
   }
   // Load (or reload) whenever the working file changes: first open, after applying, undo and redo.
   $effect(() => { const f = st.file; void st.head; if (f) untrack(() => void loadBase(f)); });

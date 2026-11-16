@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { imageFailed } from '#lib/image-failure.ts';
   import { onMount } from 'svelte';
   import FileDrop from './FileDrop.svelte';
   import SaveButton from './SaveButton.svelte';
@@ -57,7 +58,7 @@
     reset(); files = f; confirmed = false; zoom = 1; panX = 0; panY = 0;
     first?.close(); first = null;
     try { const b = await loadBitmap(f[0]); if (my === pickSeq) first = b; else b.close(); }
-    catch { if (my === pickSeq) { status = 'That file could not be read as an image.'; bad = true; } }
+    catch (error) { if (my === pickSeq) { status = await imageFailed(error, f[0]); bad = true; } }
   }
   function choose() {
     confirmed = false; reset();
@@ -151,7 +152,7 @@
     for (let i = 0; i < files.length; i++) {
       status = `Working on ${i + 1} of ${files.length}…`;
       try { results.push(...(await one(files[i], i))); }
-      catch { results.push({ name: files[i].name, kind: 'image', filename: '', note: 'This file could not be resized. It may not be an image, or the size is too large.' }); }
+      catch (error) { results.push({ name: files[i].name, kind: 'image', filename: '', note: await imageFailed(error, files[i]) }); }
     }
     const done = results.filter((r) => r.blob);
     if (done.length > 1) {

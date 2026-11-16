@@ -4,6 +4,7 @@
   import SaveButton from './SaveButton.svelte';
   import { baseName } from '#lib/core/format.ts';
   import { loadBitmap, toBlob, type Bitmap } from '#lib/core/image.ts';
+  import { imageFailed } from '#lib/image-failure.ts';
   import { EXT, saveBlob } from '#lib/core/download.ts';
   import { RATIOS, outputSize, radiusFor } from '#lib/core/shape.ts';
   import { fitRect, renderFit } from '#lib/core/resize.ts';
@@ -24,7 +25,7 @@
     const my = ++pickSeq;
     msg = ''; bmp?.close(); bmp = null; zoom = 1; panX = 0; panY = 0;
     try { const b = await loadBitmap(f[0]); if (my === pickSeq) { bmp = b; name = f[0].name; } else b.close(); }
-    catch { if (my === pickSeq) msg = 'That file could not be read as an image.'; }
+    catch (error) { if (my === pickSeq) msg = await imageFailed(error, f[0]); }
   }
   const preset = (r: string, pct: number) => { ratioId = r; radius = pct; zoom = 1; panX = 0; panY = 0; };
 

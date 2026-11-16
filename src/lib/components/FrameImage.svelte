@@ -4,6 +4,7 @@
   import SaveButton from './SaveButton.svelte';
   import { baseName } from '#lib/core/format.ts';
   import { loadBitmap, toBlob, type Bitmap } from '#lib/core/image.ts';
+  import { imageFailed } from '#lib/image-failure.ts';
   import { FRAME_SIZES, PHONE_COLORS, PHONE_STYLES, WALLS, WALL_STYLES, drawPhoneFrame, drawWallFrame, type PhoneStyle, type WallStyle } from '#lib/core/frames.ts';
 
   const MATS = [{ id: '#ffffff', label: 'White' }, { id: '#f2ead8', label: 'Cream' }, { id: '#1b1b1b', label: 'Black' }, { id: '#c9ccd1', label: 'Grey' }];
@@ -37,7 +38,7 @@
       if (k < 1) { const c = document.createElement('canvas'); c.width = Math.round(b.width * k); c.height = Math.round(b.height * k); c.getContext('2d')!.drawImage(b.source, 0, 0, c.width, c.height); b.close(); bmp = { width: c.width, height: c.height, source: c, close: () => { c.width = 0; } }; }
       else bmp = b;
       name = f[0].name;
-    } catch { if (my === pickSeq) msg = 'That file could not be read as an image.'; }
+    } catch (error) { if (my === pickSeq) msg = await imageFailed(error, f[0]); }
   }
 
   $effect(() => {

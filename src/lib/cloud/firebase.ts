@@ -10,6 +10,7 @@ import { ADMINS_COLLECTION, normalizeEmail, sortedAdmins } from '#lib/core/admin
 import { deleteAllParts, downloadCloud, mimeOf, parseTrash, partId, readIndex, shardDocName, type CloudEntry, type CloudFile, type CloudStore, type ReadIndex, type TrashItem } from '#lib/core/cloud-library.ts';
 import { FILE_CACHE_MAX_BYTES, FILE_CACHE_NAME, cachedDownload, planEviction, type FileCache } from '#lib/core/file-cache.ts';
 import { parseLibraryStructure, type LibraryStructure } from '#lib/core/library-structure.ts';
+import { userPartId } from '#lib/core/user-library.ts';
 
 /** False until the Firebase web app settings are filled in (src/lib/site.ts). Then the site works exactly as before, with no uploaded files. */
 export const cloudEnabled = (): boolean => !!SITE.firebase.apiKey && !!SITE.firebase.appId;
@@ -18,9 +19,9 @@ type Lite = typeof import('firebase/firestore/lite');
 const STRUCTURE = ['library', 'structure'] as const;
 const TRASH = ['library', 'trash'] as const;
 
-async function open(name: 'reader' | 'admin') {
+export async function openFirebase(name: 'reader' | 'admin' | 'user') {
   const { initializeApp, getApps, getApp } = await import('firebase/app');
-  if (name === 'admin') await import('firebase/auth');      // registers sign-in so Firestore sends the admin's token
+  if (name !== 'reader') await import('firebase/auth');
   const fs: Lite = await import('firebase/firestore/lite');
   const existing = getApps().some((a) => a.name === name);
   const app = existing ? getApp(name) : initializeApp(SITE.firebase, name);
@@ -32,13 +33,16 @@ async function open(name: 'reader' | 'admin') {
   }
   return { app, fs, db: fs.getFirestore(app) };
 }
-const readerP = { current: undefined as ReturnType<typeof open> | undefined };
-const adminP = { current: undefined as ReturnType<typeof open> | undefined };
-const reader = () => (readerP.current ??= open('reader'));
-const admin = () => (adminP.current ??= open('admin'));
+const readerP = { current: undefined as ReturnType<typeof openFirebase> | undefined };
+const adminP = { current: undefined as ReturnType<typeof openFirebase> | undefined };
+export const reader = () => (readerP.current ??= openFirebase('reader'));
+const admin = () => (adminP.current ??= openFirebase('admin'));
+export const adminApp = admin;
 
-function makeStore({ fs, db }: Awaited<ReturnType<typeof open>>): CloudStore {
-  const part = (id: string, i: number) => fs.doc(db, 'libraryChunks', id, 'parts', partId(i));
+function makeStore({ fs, db }: Awaited<ReturnType<typeof openFirebase>>, student = false): CloudStore {
+  const part = (id: string, i: number) => student
+    ? fs.doc(db, 'userChunks', id, 'parts', userPartId(i))
+    : fs.doc(db, 'libraryChunks', id, 'parts', partId(i));
   const shardDoc = (n: number) => fs.doc(db, 'library', shardDocName(n));
   return {
     async putPart(id, i, bytes) { await fs.setDoc(part(id, i), { data: fs.Bytes.fromUint8Array(bytes) }); },
@@ -141,13 +145,13 @@ export async function getLibraryStructure(): Promise<LibraryStructure> {
 }
 
 /** Reads the file's pieces and returns them with their original content type. */
-export async function fetchCloudFile(file: { name: string; ext: string; size?: number; cloud: { id: string; parts: number } }, onProgress?: (done: number, total: number) => void): Promise<Blob> {
-  const bytes = await cachedDownload(deviceCache(), loading, file.cloud.id, file.size, async () => downloadCloud(makeStore(await reader()), file.cloud.id, file.cloud.parts, onProgress), onProgress);
+export async function fetchCloudFile(file: { name: string; ext: string; size?: number; cloud: { id: string; parts: number; user?: boolean } }, onProgress?: (done: number, total: number) => void): Promise<Blob> {
+  const bytes = await cachedDownload(deviceCache(), loading, file.cloud.id, file.size, async () => downloadCloud(makeStore(await reader(), file.cloud.user === true), file.cloud.id, file.cloud.parts, onProgress), onProgress);
   return new Blob([bytes as BlobPart], { type: mimeOf(file.ext) });
 }
 
 /** Reads the file's pieces and hands the finished file to the browser as a normal download. */
-export async function saveCloudFile(file: { name: string; ext: string; size?: number; cloud: { id: string; parts: number } }, onProgress?: (done: number, total: number) => void): Promise<void> {
+export async function saveCloudFile(file: { name: string; ext: string; size?: number; cloud: { id: string; parts: number; user?: boolean } }, onProgress?: (done: number, total: number) => void): Promise<void> {
   const blob = await fetchCloudFile(file, onProgress);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -207,10 +211,7 @@ export async function adminSaveLibraryStructure(sections: LibraryStructure): Pro
 export async function adminListAdmins(): Promise<string[] | null> {
   const { fs, db } = await admin();
   try {
-    const [current, legacy] = await Promise.all([
-      fs.getDocs(fs.collection(db, ADMINS_COLLECTION)),
-      fs.getDocs(fs.collection(db, 'admins'))
-    ]);
+    const [current, legacy] = await Promise.all([fs.getDocs(fs.collection(db, ADMINS_COLLECTION)), fs.getDocs(fs.collection(db, 'admins'))]);
     return sortedAdmins([...current.docs, ...legacy.docs].map((d) => d.id));
   }
   catch (e) { if ((e as { code?: string }).code === 'permission-denied') return null; throw e; }
@@ -222,8 +223,5 @@ export async function adminAddAdmin(email: string): Promise<void> {
 export async function adminRemoveAdmin(email: string): Promise<void> {
   const { fs, db } = await admin();
   const id = normalizeEmail(email);
-  await Promise.all([
-    fs.deleteDoc(fs.doc(db, ADMINS_COLLECTION, id)),
-    fs.deleteDoc(fs.doc(db, 'admins', id))
-  ]);
+  await Promise.all([fs.deleteDoc(fs.doc(db, ADMINS_COLLECTION, id)), fs.deleteDoc(fs.doc(db, 'admins', id))]);
 }

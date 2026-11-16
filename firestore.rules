@@ -20,6 +20,13 @@ service cloud.firestore {
             || exists(/databases/$(database)/documents/admins/$(request.auth.token.email.lower()))));
     }
 
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function isGoogleUser() {
+      return signedIn() && request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+
     // Owner-managed helper lists. Keep the old collection readable/manageable during the transition.
     match /libraryAdmins/{email} {
       allow read, delete: if isOwner();
@@ -30,7 +37,80 @@ service cloud.firestore {
       allow create, update: if isOwner() && email == email.lower() && request.resource.data.keys().hasOnly(['added']);
     }
 
-    // One small document lists every uploaded file, so a page view costs one read.
+    // Student account counters and per-file unlock records. A new unlock and its one-use increment must be one atomic batch.
+    match /users/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['used'])
+        && request.resource.data.used is int && request.resource.data.used == 1;
+      allow update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['used'])
+        && request.resource.data.used is int && request.resource.data.used == resource.data.used + 1
+        && request.resource.data.used <= 100000;
+      allow delete: if signedIn() && request.auth.uid == uid;
+
+      match /unlocked/{fileId} {
+        allow get, list, delete: if signedIn() && request.auth.uid == uid;
+        allow create: if signedIn() && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['at'])
+          && request.resource.data.at is int
+          && getAfter(/databases/$(database)/documents/users/$(uid)).data.used
+            == (exists(/databases/$(database)/documents/users/$(uid))
+              ? get(/databases/$(database)/documents/users/$(uid)).data.used + 1 : 1);
+      }
+      match /notices/{noticeId} {
+        allow get, list: if signedIn() && request.auth.uid == uid;
+        allow delete: if isAdmin() || (signedIn() && request.auth.uid == uid);
+        allow create, update: if isAdmin()
+          && request.resource.data.keys().hasOnly(['kind', 'title', 'reason', 'at'])
+          && request.resource.data.kind == 'pulled'
+          && request.resource.data.title is string && request.resource.data.title.size() <= 120
+          && request.resource.data.reason is string && request.resource.data.reason.size() <= 500;
+      }
+    }
+
+    function validUserFile(d) {
+      return d.keys().hasOnly(['uploader', 'title', 'name', 'size', 'ext', 'section', 'cls', 'subject', 'category', 'added', 'parts', 'sha', 'status'])
+        && d.keys().hasAll(['uploader', 'title', 'name', 'size', 'ext', 'section', 'cls', 'category', 'added', 'parts', 'status'])
+        && d.uploader == request.auth.uid && d.status == 'uploading'
+        && d.size is int && d.size >= 10000 && d.size <= 5242880
+        && d.parts is int && d.parts >= 1 && d.parts <= 7
+        && d.ext in ['pdf', 'docx', 'pptx', 'xlsx', 'txt', 'png', 'jpg', 'jpeg']
+        && d.category in ['notes', 'assignments', 'past-papers', 'other']
+        && d.title is string && d.title.size() >= 1 && d.title.size() <= 120
+        && d.name is string && d.name.size() >= 1 && d.name.size() <= 200
+        && d.section is string && d.section.size() >= 1 && d.section.size() <= 80
+        && d.cls is string && d.cls.size() >= 1 && d.cls.size() <= 80
+        && d.added is string && d.added.size() == 10
+        && (!('subject' in d) || (d.subject is string && d.subject.size() <= 80))
+        && (!('sha' in d) || (d.sha is string && d.sha.size() == 64));
+    }
+    match /userFiles/{fileId} {
+      allow get, list: if resource.data.status == 'live'
+        || (signedIn() && resource.data.uploader == request.auth.uid) || isAdmin();
+      allow create: if isGoogleUser() && validUserFile(request.resource.data);
+      allow update: if isAdmin()
+        || (isGoogleUser() && resource.data.uploader == request.auth.uid && resource.data.status == 'uploading'
+          && request.resource.data.status == 'live'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+          && exists(/databases/$(database)/documents/userChunks/$(fileId)/parts/$(string(resource.data.parts - 1))));
+      allow delete: if isAdmin() || (signedIn() && resource.data.uploader == request.auth.uid);
+    }
+    match /userChunks/{fileId}/parts/{part} {
+      allow get: if get(/databases/$(database)/documents/userFiles/$(fileId)).data.status == 'live'
+        || isAdmin()
+        || (signedIn() && get(/databases/$(database)/documents/userFiles/$(fileId)).data.uploader == request.auth.uid);
+      allow create, update: if isGoogleUser()
+        && get(/databases/$(database)/documents/userFiles/$(fileId)).data.uploader == request.auth.uid
+        && get(/databases/$(database)/documents/userFiles/$(fileId)).data.status == 'uploading'
+        && request.resource.data.keys().hasOnly(['data'])
+        && request.resource.data.data is bytes
+        && request.resource.data.data.size() <= 900000;
+      allow delete: if isAdmin()
+        || (signedIn() && get(/databases/$(database)/documents/userFiles/$(fileId)).data.uploader == request.auth.uid);
+    }
+
+    // Student upload settings are public to read and writable only by the Library admins.
     match /library/{doc} {
       allow get: if true;
       allow write: if isAdmin();

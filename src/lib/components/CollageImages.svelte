@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { imageFailed } from '#lib/image-failure.ts';
   import FileDrop from './FileDrop.svelte';
   import SaveButton from './SaveButton.svelte';
   import { baseName } from '#lib/core/format.ts';
@@ -22,7 +23,7 @@
     msg = ''; const room = MAX_PHOTOS - photos.length;
     if (files.length > room) msg = `Only ${MAX_PHOTOS} photos fit in one collage, so ${files.length - room} were left out.`;
     for (const f of files.slice(0, Math.max(0, room))) {
-      try { photos.push({ id: nextId++, name: f.name, c: await loadCanvas(f, STORE) }); } catch { msg = `${f.name} could not be read as an image.`; }
+      try { photos.push({ id: nextId++, name: f.name, c: await loadCanvas(f, STORE) }); } catch (error) { msg = await imageFailed(error, f); }
     }
   }
   function move(i: number, d: number) { const j = i + d; if (j < 0 || j >= photos.length) return; [photos[i], photos[j]] = [photos[j], photos[i]]; }

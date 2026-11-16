@@ -16,6 +16,7 @@
     addClass, addSection, addSubject, deleteClass, deleteSection, deleteSubject, newLibraryId,
     renameClass, renameSection, renameSubject, type LibraryStructure
   } from '#lib/core/library-structure.ts';
+  import StudentModeration from '#lib/components/StudentModeration.svelte';
 
   const ACCEPT = ALLOWED_EXT.map((e) => '.' + e).join(',');
   const enabled = cloudEnabled();
@@ -221,6 +222,7 @@
     </section>
   {:else}
     <div class="who">Signed in as <strong>{session.email}</strong> · <button class="link" type="button" onclick={signOut}>Sign out</button></div>
+    <StudentModeration />
     <h2>Library structure</h2>
     <div class="hierarchy">
       <section class="level">
