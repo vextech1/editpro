@@ -361,3 +361,12 @@ export function friendlyCloudError(code: string | undefined, fallback = ''): str
   if (c === 'unauthenticated') return 'Please sign in again.';
   return fallback || 'Something went wrong. Please try again.';
 }
+
+/** What a student sees when a download fails. Unlike friendlyCloudError, it never talks about admin sign-in. */
+export function downloadErrorMessage(e: unknown): string {
+  const code = (e as { code?: string } | null)?.code;
+  const msg = e instanceof Error ? e.message : '';
+  if (/piece \d+ of the file is missing/i.test(msg)) return 'This file is incomplete on our side, so it cannot be downloaded. Please let us know and we will upload it again.';
+  if (code === 'permission-denied' || code === 'unauthenticated') return 'This file could not be downloaded right now. Please try again later.';
+  return friendlyCloudError(code, 'The download did not finish. Please try again.');
+}

@@ -2,7 +2,8 @@
 export interface Cell { x: number; y: number; w: number; h: number }
 export interface Layout { W: number; H: number; cells: Cell[] }
 export const CELL_ASPECTS = [{ id: '1:1', r: 1 }, { id: '4:3', r: 4 / 3 }, { id: '3:4', r: 3 / 4 }, { id: '3:2', r: 3 / 2 }, { id: '16:9', r: 16 / 9 }, { id: '9:16', r: 9 / 16 }] as const;
-export const MAX_SIDE = 12000;
+// Same ceilings as the photo editor, so a collage can always be opened and edited there (and phones can still draw it).
+export const MAX_SIDE = 8000, MAX_PIXELS = 40_000_000;
 
 const r = Math.round;
 /** A sensible number of columns for n photos: as square a grid as possible. */
@@ -36,8 +37,8 @@ export function columnLayout(aspects: number[], outW: number, gap: number, pad: 
 export function scaleLayout(l: Layout, k: number): Layout {
   return { W: Math.max(1, r(l.W * k)), H: Math.max(1, r(l.H * k)), cells: l.cells.map((c) => ({ x: r(c.x * k), y: r(c.y * k), w: Math.max(1, r(c.w * k)), h: Math.max(1, r(c.h * k)) })) };
 }
-/** Shrink a layout so neither side passes `max`. */
-export function limitLayout(l: Layout, max = MAX_SIDE): Layout {
-  const k = Math.min(1, max / Math.max(l.W, l.H));
+/** Shrink a layout so neither side passes `max` and the whole picture stays under `maxPixels`. */
+export function limitLayout(l: Layout, max = MAX_SIDE, maxPixels = MAX_PIXELS): Layout {
+  const k = Math.min(1, max / Math.max(l.W, l.H), Math.sqrt(maxPixels / (l.W * l.H)) * 0.9999);   // the margin covers rounding to whole pixels
   return k === 1 ? l : scaleLayout(l, k);
 }

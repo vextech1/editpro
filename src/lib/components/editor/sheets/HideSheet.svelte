@@ -19,7 +19,7 @@
   $effect(() => {
     if (!view) return;
     const list = boxes.map((b) => ({ kind: b.kind, strength: b.strength, r: { ...b.r } })), d = draft, k = prev.width / base.width, pw = prev.width, ph = prev.height;
-    view.width = pw; view.height = ph; const ctx = view.getContext('2d')!; ctx.drawImage(prev, 0, 0);
+    view.width = pw; view.height = ph; const ctx = view.getContext('2d', { willReadFrequently: true })!; ctx.drawImage(prev, 0, 0);
     if (list.length) { const id = ctx.getImageData(0, 0, pw, ph); for (const b of list) applyRedaction(id.data, pw, ph, scaleRect(b.r, k), b.kind, b.strength); ctx.putImageData(id, 0, 0); }
     if (d) { ctx.save(); ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); const r = scaleRect(d, k); ctx.strokeRect(r.x, r.y, r.w, r.h); ctx.restore(); }
   });

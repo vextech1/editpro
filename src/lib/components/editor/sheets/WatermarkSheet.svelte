@@ -15,7 +15,7 @@
   let { base, prev, view, busy, onapply, oncancel }: SheetProps = $props();
   const KINDS = [{ id: 'text', label: 'Text' }, { id: 'logo', label: 'Logo' }] as const;
   const POS = [...POSITIONS, { id: 'tile', label: 'Repeat' }] as { id: Pos; label: string }[];
-  let kind = $state<'text' | 'logo'>('text'), text = $state('© Your name'), color = $state('#ffffff'), outline = $state(true);
+  let kind = $state<'text' | 'logo'>('text'), text = $state(''), color = $state('#ffffff'), outline = $state(true);
   let logo = $state.raw<HTMLCanvasElement | null>(null), logoName = $state(''), err = $state('');
   let pos = $state<Pos>('br'), sizePct = $state(30), opacity = $state(60), angle = $state(0), margin = $state(3), gap = $state(60);
   let param = $state('size');
@@ -30,7 +30,7 @@
 
   const mark = $derived(buildMark({ kind, text, color, outline, logo }));
   const look = $derived<MarkLook>({ pos, sizePct, opacity, angle, margin, gap, at: pos === 'tile' ? null : at });
-  const changed = $derived(kind !== 'text' || text !== '© Your name' || pos !== 'br' || sizePct !== 30 || opacity !== 60 || angle !== 0 || margin !== 3 || gap !== 60 || !!at || color !== '#ffffff' || !outline || !!logo);
+  const changed = $derived(kind !== 'text' || text !== '' || pos !== 'br' || sizePct !== 30 || opacity !== 60 || angle !== 0 || margin !== 3 || gap !== 60 || !!at || color !== '#ffffff' || !outline || !!logo);
 
   $effect(() => {
     if (!view) return;
@@ -66,14 +66,15 @@
     return () => { pinching = false; from = null; origin = null; stops.reverse().forEach((stop) => stop()); };
   });
   function pickPos(p: Pos) { pos = p; at = null; }
-  function reset() { at = null; kind = 'text'; text = '© Your name'; color = '#ffffff'; outline = true; pos = 'br'; sizePct = 30; opacity = 60; angle = 0; margin = 3; gap = 60; logo = null; logoName = ''; param = 'size'; err = ''; }
+  function reset() { at = null; kind = 'text'; text = ''; color = '#ffffff'; outline = true; pos = 'br'; sizePct = 30; opacity = 60; angle = 0; margin = 3; gap = 60; logo = null; logoName = ''; param = 'size'; err = ''; }
   function apply() { const m = mark, l = { ...look }; if (!m) return; void onapply(() => renderMarked(base, m, l), 'Watermark'); }
 </script>
 
 <ToolSheet title="Watermark" canReset={changed} onreset={reset} onapply={apply} {oncancel} busy={busy || !mark}>
   <Chips items={KINDS} value={kind} onpick={(k) => (kind = k)} label="Mark type" />
   {#if kind === 'text'}
-    <div class="sh-row"><Field label="Text" type="text" bind:value={text} /></div>
+    <div class="sh-row"><Field label="Text" type="text" placeholder="Type your name, for example © Jane 2026" bind:value={text} /></div>
+    {#if !mark}<p class="sh-hint">Type the words to add. Nothing is added to the photo until you do.</p>{/if}
     <Swatches colors={['#ffffff', '#000000', '#e11d48', '#2563eb', '#f59e0b']} bind:value={color} label="Text colour" />
     <label class="sh-chk"><input type="checkbox" bind:checked={outline} /> Outline, so it reads on any photo</label>
   {:else}

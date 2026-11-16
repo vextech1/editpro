@@ -10,7 +10,9 @@ export const SITE = {
   // Firebase web app settings, from Firebase console > Project settings > Your apps > Web app. They are not secret (anyone can see them in
   // any Firebase site); the Firestore rules decide who can change anything. Leave apiKey empty to switch uploaded files off.
   firebase: { apiKey: 'AIzaSyAK4hhs2PJlS72a-fQYeo0TuDZr9lekodc', authDomain: 'editpro.site', projectId: 'editpro1', appId: '1:688212947039:web:639d069171d3bf126a6bea' },
-  // reCAPTCHA v3 site key for Firebase App Check (Firebase console > App Check > your web app). Not secret. Leave empty until App Check is set up.
+  // reCAPTCHA v3 site key for Firebase App Check (Firebase console > App Check > Apps > your web app > reCAPTCHA v3). It is a public key.
+  // Leave it empty to leave App Check off. After filling it in, open App Check in the Firebase console and click Enforce for Cloud Firestore:
+  // enforcement is switched on there, not in firestore.rules.
   appCheckSiteKey: '',
 };
 export const abs = (path: string) => SITE.origin + path;

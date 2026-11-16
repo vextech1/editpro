@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyAdjust, isNeutral, NO_ADJUST, fitAspect, dragCrop, aspectRatio, ASPECTS, type Adjust, type Rect, type Handle } from '../src/lib/core/image-edit';
+import { applyAdjust, toneTable, isNeutral, NO_ADJUST, fitAspect, dragCrop, aspectRatio, ASPECTS, type Adjust, type Rect, type Handle } from '../src/lib/core/image-edit';
 
 const px = (r: number, g: number, b: number) => new Uint8ClampedArray([r, g, b, 255]);
 const run = (a: Partial<Adjust>, p = px(120, 120, 120)) => { applyAdjust(p, { ...NO_ADJUST, ...a }); return Array.from(p.slice(0, 3)); };
@@ -89,5 +89,27 @@ describe('dragging the crop box', () => {
         r = n;
       }
     }
+  });
+});
+
+describe('brightness and contrast keep black and white in place', () => {
+  it('the tone table never moves pure black or pure white, at any slider setting', () => {
+    for (const b of [-100, -30, 0, 30, 100]) for (const c of [-100, -30, 0, 30, 100]) { const t = toneTable(b, c); expect(t[0]).toBe(0); expect(t[255]).toBe(255); }
+  });
+  it('the table only ever rises, so no tones swap places', () => {
+    for (const [b, c] of [[100, 100], [-100, 100], [100, -100], [30, 30]]) { const t = toneTable(b, c); for (let v = 1; v < 256; v++) expect(t[v]).toBeGreaterThanOrEqual(t[v - 1]); }
+  });
+  it('brightness lifts or lowers the middle without clipping a light or dark pixel', () => {
+    expect(run({ brightness: 30 })[0]).toBeGreaterThan(120); expect(run({ brightness: -30 })[0]).toBeLessThan(120);
+    expect(run({ brightness: 100 }, px(200, 200, 200))[0]).toBeLessThan(255);   // used to go straight to white
+    const dark = run({ brightness: -100 }, px(120, 120, 120))[0]; expect(dark).toBeGreaterThan(0); expect(dark).toBeLessThan(120);   // even at the limit the middle is darkened, not blacked out
+  });
+  it('contrast pushes tones apart and a negative value pulls them together, with no hard clipping at +30', () => {
+    const lo = run({ contrast: 30 }, px(60, 60, 60))[0], hi = run({ contrast: 30 }, px(200, 200, 200))[0];
+    expect(lo).toBeLessThan(60); expect(hi).toBeGreaterThan(200); expect(lo).toBeGreaterThan(0); expect(hi).toBeLessThan(255);
+    expect(run({ contrast: -50 }, px(60, 60, 60))[0]).toBeGreaterThan(60);
+  });
+  it('Clean document still whitens paper and blackens ink', () => {
+    expect(run({ mode: 'document' }, px(200, 200, 200))[0]).toBe(255); expect(run({ mode: 'document' }, px(40, 40, 40))[0]).toBeLessThan(15);
   });
 });

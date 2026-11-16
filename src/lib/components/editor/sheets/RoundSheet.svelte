@@ -12,6 +12,8 @@
 
   let { base, prev, view, busy, onapply, oncancel, outDims = $bindable(null) }: SheetProps = $props();
   const SHAPES = [{ id: 'circle', label: 'Circle', ratio: '1:1', r: 50 }, { id: 'rounded', label: 'Rounded square', ratio: '1:1', r: 18 }, { id: 'soft', label: 'Soft corners', ratio: 'original', r: 10 }] as const;
+  const FORMATS = [{ id: 'image/png', label: 'PNG, works everywhere' }, { id: 'image/webp', label: 'WebP, much smaller' }];
+  let fmt = $state('image/png');
   let ratioId = $state<string>('1:1'), radius = $state(50), zoom = $state(100), panX = $state(0), panY = $state(0);
 
   const ratio = $derived(RATIOS.find((r) => r.id === ratioId)?.r ?? 0);
@@ -41,7 +43,7 @@
 
   function apply() {
     const o = { ...out }, r = radius, z = zoom / 100, x = panX, y = panY;
-    void onapply(() => renderRound(base, o.w, o.h, r, z, x, y), r >= 50 && o.w === o.h ? 'Circle' : 'Round', { type: r > 0 ? 'image/png' : undefined });   // cut corners are see-through, which only PNG keeps
+    void onapply(() => renderRound(base, o.w, o.h, r, z, x, y), r >= 50 && o.w === o.h ? 'Circle' : 'Round', { type: r > 0 ? fmt : undefined, quality: 0.9 });   // cut corners are see-through, which PNG and WebP keep (JPG does not)
   }
 </script>
 
@@ -50,5 +52,6 @@
   <SliderRow label="Corner roundness" min={0} max={50} bind:value={radius} />
   <Chips items={RATIOS.map((r) => ({ id: r.id, label: r.label }))} value={ratioId} onpick={(id) => { ratioId = id; panX = 0; panY = 0; }} label="Picture shape" />
   <SliderRow label="Zoom" min={100} max={400} step={5} bind:value={zoom} />
-  <p class="sh-hint">Drag the photo to move it inside the shape. Rounded corners are saved as PNG so they stay clear.</p>
+  <Chips items={FORMATS} value={fmt} onpick={(id) => (fmt = id)} label="Save as" />
+  <p class="sh-hint">Drag the photo to move it inside the shape. Rounded corners are saved as PNG or WebP so they stay clear. WebP is often a tenth of the size.</p>
 </ToolSheet>

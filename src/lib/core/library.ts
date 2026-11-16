@@ -151,7 +151,15 @@ export class Library {
       const m = (await this.store.metas()).find((x) => x.id === id); if (m) await this.store.setMeta(f({ ...m }));
     });
   }
-  rename(id: string, name: string) { const n = name.trim(); return n ? this.patch(id, (m) => ({ ...m, name: n })) : Promise.resolve(); }
+  /** Rename a file. A name another saved file already uses (in any capitals) gets "(2)" added, the same as when saving, so two rows are never confusable. */
+  rename(id: string, name: string): Promise<void> {
+    const n = name.trim(); if (!n) return Promise.resolve();
+    return this.serial(async () => {
+      const metas = await this.store.metas(), m = metas.find((x) => x.id === id); if (!m) return;
+      const unique = uniqueName(n, metas.filter((x) => x.id !== id && !x.deleted).map((x) => x.name));
+      if (unique !== m.name) await this.store.setMeta({ ...m, name: unique });
+    });
+  }
   /** Star or unstar a file. The star is kept if the file goes to the trash and comes back. */
   setFavorite(id: string, on: boolean) { return this.patch(id, (m) => { if (on) m.favorite = true; else delete m.favorite; return m; }); }
   /** Apply one change to several files in a single step. */
@@ -160,11 +168,24 @@ export class Library {
     return this.serial(async () => { for (const m of await this.store.metas()) if (want.has(m.id)) await this.store.setMeta(f({ ...m })); });
   }
   trashMany(ids: string[]) { return this.patchMany(ids, (m) => ({ ...m, deleted: this.now() })); }
-  restoreMany(ids: string[]) { return this.patchMany(ids, (m) => { delete m.deleted; return m; }); }
+  /** Bring files back from the trash. If another saved file has taken a restored file's name in the meantime, the restored one gets "(2)" added. */
+  restoreMany(ids: string[]): Promise<void> {
+    const want = new Set(ids);
+    return this.serial(async () => {
+      const metas = await this.store.metas();
+      const taken = metas.filter((m) => !m.deleted && !want.has(m.id)).map((m) => m.name);   // grows as files come back, so two restored files cannot clash with each other either
+      for (const m of metas) {
+        if (!want.has(m.id)) continue;
+        const next = { ...m }; delete next.deleted;
+        if (m.deleted) next.name = uniqueName(m.name, taken); taken.push(next.name);
+        await this.store.setMeta(next);
+      }
+    });
+  }
   favoriteMany(ids: string[], on: boolean) { return this.patchMany(ids, (m) => { if (on) m.favorite = true; else delete m.favorite; return m; }); }
   removeMany(ids: string[]) { return this.serial(async () => { for (const id of ids) await this.store.remove(id); this.cache = undefined; }); }
   trash(id: string) { return this.patch(id, (m) => ({ ...m, deleted: this.now() })); }
-  restore(id: string) { return this.patch(id, (m) => { delete m.deleted; return m; }); }
+  restore(id: string) { return this.restoreMany([id]); }
   removeForever(id: string) { return this.serial(async () => { await this.store.remove(id); this.cache = undefined; }); }
   emptyTrash() { return this.serial(async () => { for (const f of await this.list({ trash: true })) await this.store.remove(f.id); this.cache = undefined; }); }
   /** Permanently remove anything that has been in the trash longer than `days`. Returns how many were removed. */

@@ -1,7 +1,7 @@
 <script lang="ts">
   // A labelled number box, text box or drop-down for a sheet.
-  let { label, value = $bindable(), type = 'number', options = [], min, max, step, disabled = false, onchange }:
-    { label: string; value?: any; type?: 'number' | 'text' | 'select'; options?: readonly { id: string; label: string }[]; min?: number; max?: number; step?: number; disabled?: boolean; onchange?: () => void } = $props();
+  let { label, value = $bindable(), type = 'number', options = [], min, max, step, disabled = false, placeholder = '', onchange }:
+    { label: string; placeholder?: string; value?: any; type?: 'number' | 'text' | 'select'; options?: readonly { id: string; label: string }[]; min?: number; max?: number; step?: number; disabled?: boolean; onchange?: () => void } = $props();
   const uid = $props.id();
 </script>
 <div class="fld">
@@ -9,7 +9,7 @@
   {#if type === 'select'}
     <select id="f-{uid}" bind:value {disabled} {onchange}>{#each options as o (o.id)}<option value={o.id}>{o.label}</option>{/each}</select>
   {:else if type === 'text'}
-    <input id="f-{uid}" type="text" bind:value {disabled} {onchange} />
+    <input id="f-{uid}" type="text" bind:value {disabled} {placeholder} {onchange} />
   {:else}
     <input id="f-{uid}" type="number" inputmode="decimal" {min} {max} {step} bind:value {disabled} {onchange} />
   {/if}

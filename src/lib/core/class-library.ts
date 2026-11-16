@@ -1,5 +1,6 @@
 // Shared, browser-safe logic for the Firestore-backed Class Library.
 import { SITE, abs } from '#lib/site.ts';
+import type { LibraryStructure } from './library-structure.ts';
 
 export type CategoryId = 'notes' | 'assignments' | 'past-papers' | 'other';
 export const CATEGORIES: { id: CategoryId; label: string }[] = [
@@ -61,4 +62,47 @@ export function isRecent(added: string | undefined, now: number, days = 14): boo
   if (!added) return false;
   const t = Date.parse(added + 'T00:00:00Z');
   return Number.isFinite(t) && now - t >= 0 && now - t < (days + 1) * 86400000;
+}
+
+/** Newest first, then by name with numbers in order ("Week 2" before "Week 10"), so the list does not shuffle between loads. */
+export function sortFiles<T extends { title: string; added?: string }>(files: T[]): T[] {
+  return [...files].sort((a, b) => (b.added ?? '').localeCompare(a.added ?? '') || a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
+}
+
+/** "2026-11-01" as "1 Nov 2026" (in the visitor's language). Anything that is not a real date reads as nothing. */
+export function fmtAdded(iso: string | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso ?? '');
+  if (!m) return '';
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  return d.getMonth() === +m[2] - 1 ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+}
+
+/** The Library address for a section, class or subject. Each level is only included when the one above it is. */
+export function libraryHref(section = '', cls = '', subject = ''): string {
+  const q = new URLSearchParams();
+  if (section) q.set('section', section);
+  if (section && cls) q.set('class', cls);
+  if (section && cls && subject) q.set('subject', subject);
+  const s = q.toString();
+  return `/class-library${s ? `?${s}` : ''}`;
+}
+
+/** "Secondary School" -> "secondary-school", to match a name typed into an old URL. Case, accents ("Matemáticas" -> "matematicas") and
+ *  punctuation do not matter, and letters of any alphabet are kept (an Arabic or Hindi name must not turn into an empty slug). */
+export function slugify(name: string): string {
+  return name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
+}
+
+/** Finds the section (and, if given, the class inside it) whose name slugifies to the given slug(s). Case- and
+ *  punctuation-insensitive, so a renamed or re-punctuated section/class can still be found by its old link. */
+export function findBySlugs(structure: LibraryStructure, sectionSlug: string, classSlug = ''): { section: string; cls: string } | undefined {
+  // The link is normalised the same way as the names, so /Medical, /medical- and /MEDICAL all find "Medical".
+  const wantSection = slugify(sectionSlug), wantClass = slugify(classSlug);
+  if (!wantSection) return undefined;
+  const section = structure.find((s) => slugify(s.name) === wantSection);
+  if (!section) return undefined;
+  if (!wantClass) return { section: section.id, cls: '' };
+  const cls = section.classes.find((c) => slugify(c.name) === wantClass);
+  return cls ? { section: section.id, cls: cls.id } : { section: section.id, cls: '' };
 }

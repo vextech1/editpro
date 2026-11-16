@@ -4,7 +4,7 @@
   import { loadBitmap, draw, toBlob } from '#lib/core/image.ts';
   import { searchQuality, setJpegDpi, setPngDpi } from '#lib/core/resize.ts';
   import { onWhite } from '#lib/core/photo-render.ts';
-  import { baseName } from '#lib/core/format.ts';
+  import { editedName } from '#lib/core/format.ts';
   import { applyAdjust, isNeutral, NO_ADJUST, ASPECTS, aspectRatio, fitAspect, type Adjust, type Rect } from '#lib/core/image-edit.ts';
   import { workspaceById } from '#lib/core/workspaces.ts';
   import { toolBySlug } from '#lib/tools.ts';
@@ -77,6 +77,10 @@
   let zoom = $state<StageTransform>({ scale: 1, x: 0, y: 0 });
   let replaceInput: HTMLInputElement;
   let token = 0;
+  // The picture an edit just produced, kept as pixels. The saved JPEG is only for storage and download; the next edit starts from these pixels,
+  // so a chain of edits is encoded once per version instead of re-compressing the previous JPEG each time.
+  let lossless: { size: number; type: string; canvas: HTMLCanvasElement } | null = null;
+  const dropLossless = () => { if (lossless) lossless.canvas.width = 0; lossless = null; };
 
   const ratio = $derived(aspectRatio(ratioId, W, H));
   const cur = $derived(PARAMS.find((p) => p.id === param)!);
@@ -91,7 +95,13 @@
   const panelTool = $derived(panelSlug ? toolBySlug(panelSlug) : undefined);
   const groupDef = $derived(IMAGE_GROUPS.find((g) => g.id === group));
   const saveLabel = $derived(saved === 'ok' ? 'Saved to My files ✓' : saved === 'failed' ? 'Could not save' : 'Save to My files');
-  const toasts = $derived<ShellToast[]>([...(msg ? [{ text: msg }] : []), ...(st.note ? [{ text: st.note }] : [])]);
+  // Saving closes the menu, and the menu item is the only other place that says it worked, so say it here too for a few seconds.
+  let savedNote = $state('');
+  $effect(() => {
+    const s = saved; if (s === 'idle') { savedNote = ''; return; }
+    savedNote = s === 'ok' ? 'Saved to My files ✓' : 'Could not save'; const t = setTimeout(() => (savedNote = ''), 3000); return () => clearTimeout(t);
+  });
+  const toasts = $derived<ShellToast[]>([...(msg ? [{ text: msg }] : []), ...(st.note ? [{ text: st.note }] : []), ...(savedNote ? [{ text: savedNote }] : [])]);
   // True while the sheet snippet shows something (the Versions sheet waits for it to close).
   const hasSheet = $derived(tool === 'adjust' || !!group || (tool === 'crop' && !!crop) || (!!base && !!prev && !!tool && tool !== 'crop'));
 
@@ -100,8 +110,14 @@
   async function loadBase(f: File) {
     const mine = ++token;
     try {
-      const bmp = await loadBitmap(f); const k = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
-      const c = draw(bmp, Math.round(bmp.width * k), Math.round(bmp.height * k), f.type === 'image/jpeg'); bmp.close();   // only JPEG gets a white backing; PNG and WebP keep their see-through areas
+      let c: HTMLCanvasElement;
+      const kept = lossless; lossless = null;
+      if (kept && kept.size === f.size && kept.type === f.type) c = kept.canvas;   // the version we just saved: use its exact pixels, not the JPEG decoded again
+      else {
+        if (kept) kept.canvas.width = 0;
+        const bmp = await loadBitmap(f); const k = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
+        c = draw(bmp, Math.round(bmp.width * k), Math.round(bmp.height * k), f.type === 'image/jpeg'); bmp.close();   // only JPEG gets a white backing; PNG and WebP keep their see-through areas
+      }
       if (mine !== token) { c.width = 0; return; }
       const p = Math.min(1, PREVIEW / Math.max(c.width, c.height)); const small = document.createElement('canvas');
       small.width = Math.max(1, Math.round(c.width * p)); small.height = Math.max(1, Math.round(c.height * p)); small.getContext('2d')!.drawImage(c, 0, 0, small.width, small.height);
@@ -119,7 +135,7 @@
     if (!view || !prev) return;
     if (t && t !== 'crop' && t !== 'adjust' && t !== 'export') return;   // the other sheets draw their own live preview
     view.width = prev.width; view.height = prev.height;
-    const ctx = view.getContext('2d')!; ctx.drawImage(prev, 0, 0);
+    const ctx = view.getContext('2d', { willReadFrequently: true })!; ctx.drawImage(prev, 0, 0);   // the preview is re-read on every slider move
     if (!isNeutral(a)) { const d = ctx.getImageData(0, 0, view.width, view.height); applyAdjust(d.data, a); ctx.putImageData(d, 0, 0); }
   });
   $effect(() => { const f = st.file; if (!f) return; const u = URL.createObjectURL(f); dl = u; return () => URL.revokeObjectURL(u); });
@@ -132,12 +148,16 @@
       const r = await searchQuality((q) => toBlob(flat, type, q), o.maxBytes - 64);
       blob = r?.blob ?? null; if (r && !r.fits) afterMsg = 'Could not get under the size limit. This is the smallest it could be.';
     } else blob = await toBlob(flat, type, o.quality ?? 0.92);
-    if (flat !== canvas) flat.width = 0;
-    if (!blob) throw new Error('encode');
+    let keep: HTMLCanvasElement | null = flat !== canvas ? flat : copy(canvas);   // the pixels that were encoded (flattened onto white for JPG)
+    if (Math.max(keep.width, keep.height) > MAX_SIDE) { keep.width = 0; keep = null; }
+    if (!blob) { if (keep) keep.width = 0; throw new Error('encode'); }
     if (o.dpi && (blob.type === 'image/jpeg' || blob.type === 'image/png')) {   // so print sizes in mm or inches stay that size
       const bytes = new Uint8Array(await blob.arrayBuffer()); blob = new Blob([(blob.type === 'image/jpeg' ? setJpegDpi(bytes, o.dpi) : setPngDpi(bytes, o.dpi)) as BlobPart], { type: blob.type });
     }
-    return st.commit(blob, label, `${baseName(f.name)}.${EXT[blob.type] ?? 'png'}`);
+    dropLossless(); if (keep) lossless = { size: blob.size, type: blob.type, canvas: keep };
+    const added = await st.commit(blob, label, editedName(f.name, EXT[blob.type] ?? 'png'));
+    if (!added) dropLossless();
+    return added;
   }
   async function run(fn: () => Promise<void>) { busy = true; msg = ''; try { await fn(); } catch { msg = 'That could not be applied. Try again.'; } busy = false; }
 
@@ -154,7 +174,7 @@
     // Rotate and Flip are instant actions: do them and leave the open group sheet (or All tools list) where it is, so they can be tapped again.
     if (id === 'rotate' || id === 'flip') { if (!busy) void transform(id); return; }
     backTo = allTools ? ALL_TOOLS_ID : group; group = null; allTools = false;
-    if (id === 'crop') { detectEdges(); tool = 'crop'; }
+    if (id === 'crop') { resetCrop(); tool = 'crop'; }   // start from the whole photo; Detect edges is a button, because the detector suits scans, not scenes
     else if (id === 'adjust') { adj = { ...NO_ADJUST }; tool = 'adjust'; }
     else if ((SHEETS as readonly string[]).includes(id)) tool = id as ToolId;
     else if (isPanelTool(id)) st.tab = id;
@@ -259,6 +279,7 @@
       <div class="pchips" role="group" aria-label="Look">
         {#each LOOKS as l (l.id)}<button type="button" class:on={adj.mode === l.id} aria-pressed={adj.mode === l.id} onclick={() => (adj = { ...adj, mode: l.id })}>{l.label}</button>{/each}
       </div>
+      {#if adj.mode === 'document'}<p class="hint" role="note">Clean document is made for scans and receipts. On an ordinary photo it turns the dark areas black.</p>{/if}
       {#key param}
         <SliderRow label={cur.label} track={TRACKS[param]} disabled={param === 'saturation' && adj.mode !== 'none'}
           bind:value={() => adj[param] ?? 0, (v) => set(param, v)} />

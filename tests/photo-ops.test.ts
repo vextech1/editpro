@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { withinLimits, previewSize, pointOn, scaleRect, targetPx, linkedSide, panBy, startFormat, limitSide, TAB_SHEET, SHEETS, PANEL_TOOLS, MAX_OUT_SIDE } from '../src/lib/core/photo-ops';
+import { MIN_OUT_SIDE, withinLimits, previewSize, pointOn, scaleRect, targetPx, linkedSide, panBy, startFormat, limitSide, TAB_SHEET, SHEETS, PANEL_TOOLS, MAX_OUT_SIDE } from '../src/lib/core/photo-ops';
 import { presetById } from '../src/lib/core/presets';
 import { fitRect } from '../src/lib/core/resize';
 import { workspaceById } from '../src/lib/core/workspaces';
@@ -40,6 +40,10 @@ describe('output limits and previews', () => {
   it('accepts normal sizes and refuses absurd ones', () => {
     expect(withinLimits(1200, 800)).toBe(true); expect(withinLimits(MAX_OUT_SIDE, 100)).toBe(true);
     expect(withinLimits(MAX_OUT_SIDE + 1, 10)).toBe(false); expect(withinLimits(7000, 7000)).toBe(false); expect(withinLimits(0, 10)).toBe(false);
+  });
+  it('refuses a picture too small to be useful, such as 1 × 1', () => {
+    expect(withinLimits(1, 1)).toBe(false); expect(withinLimits(MIN_OUT_SIDE - 1, 500)).toBe(false);
+    expect(withinLimits(MIN_OUT_SIDE, MIN_OUT_SIDE)).toBe(true);
   });
   it('previews keep the shape, never enlarge, and never reach 0', () => {
     expect(previewSize(2000, 1000, 500)).toEqual({ w: 500, h: 250, k: 0.25 });

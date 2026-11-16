@@ -1,18 +1,23 @@
-// A copy of each downloaded Library file kept on the visitor's own device, so opening a file and then saving it, or downloading it a
-// second time, costs no Firestore reads. A file's id is never reused (a replaced file gets a new id), so a saved copy can never be stale.
-// This is the browser-safe logic; the Cache API calls live in #lib/cloud/firebase.ts.
-export const FILE_CACHE_NAME = 'editpro-library-files';
-/** Most bytes kept on one device. The oldest copies go first. */
+// Copies of Library files kept on the student's device, so a file opened before opens again without downloading it again (and without
+// spending the free daily reads). The browser side (Cache API) lives in cloud/firebase.ts; the decisions live here so they can be tested.
+
+export const FILE_CACHE_NAME = 'editpro-library-files-v1';
+/** The most this device keeps. Older copies are dropped first when a new one would go over. */
 export const FILE_CACHE_MAX_BYTES = 150 * 1024 * 1024;
 
+/** Where copies are kept. Either call may fail (storage full, private mode); the download never depends on it. */
 export interface FileCache {
   get(id: string): Promise<Uint8Array | undefined>;
   put(id: string, bytes: Uint8Array): Promise<void>;
 }
+
 export interface CachedItem { id: string; size: number; at: number }
 
-/** Which saved copies to remove so the rest fit in `maxBytes`: oldest first, and never the one just saved (`keepId`). */
-export function planEviction(items: CachedItem[], maxBytes = FILE_CACHE_MAX_BYTES, keepId?: string): string[] {
+/**
+ * The copies to delete so that what is kept fits in `maxBytes`: the oldest go first, and `keepId` (the one just saved) is never chosen.
+ * If `keepId` alone is bigger than `maxBytes`, everything else goes and it stays, because it was just asked for.
+ */
+export function planEviction(items: CachedItem[], maxBytes: number, keepId: string): string[] {
   let total = items.reduce((n, i) => n + i.size, 0);
   const out: string[] = [];
   for (const item of [...items].sort((a, b) => a.at - b.at)) {
@@ -24,24 +29,22 @@ export function planEviction(items: CachedItem[], maxBytes = FILE_CACHE_MAX_BYTE
 }
 
 /**
- * Returns the file from the device copy when there is one of the right size; otherwise loads it once (a second request for the same
- * file while it loads shares that load) and saves a copy. The device copy is only a shortcut: any problem with it is ignored.
+ * The file's bytes: from this device if a copy of the right size is there, otherwise from `fetchBytes`, then copied to the device.
+ * Two requests for the same file at once share one download (`inflight`). A copy whose size is not the expected `size` is treated as damaged.
  */
 export async function cachedDownload(
   cache: FileCache | undefined, inflight: Map<string, Promise<Uint8Array>>, id: string, size: number | undefined,
-  load: () => Promise<Uint8Array>, onProgress?: (done: number, total: number) => void
+  fetchBytes: () => Promise<Uint8Array>, onProgress?: (done: number, total: number) => void
 ): Promise<Uint8Array> {
-  if (cache) {
-    try {
-      const hit = await cache.get(id);
-      if (hit && (size === undefined || hit.length === size)) { onProgress?.(1, 1); return hit; }
-    } catch { /* no usable copy: load it */ }
-  }
-  const running = inflight.get(id);
-  if (running) return running;
+  const running = inflight.get(id); if (running) return running;
   const job = (async () => {
-    const bytes = await load();
-    if (cache) { try { await cache.put(id, bytes); } catch { /* storage full or blocked: the download still works */ } }
+    if (cache) {
+      let saved: Uint8Array | undefined;
+      try { saved = await cache.get(id); } catch { /* an unreadable cache is the same as an empty one */ }
+      if (saved && (size === undefined || saved.length === size)) { onProgress?.(1, 1); return saved; }
+    }
+    const bytes = await fetchBytes();
+    if (cache) void cache.put(id, bytes).catch(() => { /* optional: the file still opens */ });
     return bytes;
   })();
   inflight.set(id, job);

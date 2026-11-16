@@ -1,37 +1,36 @@
 rules_version = '2';
 // Rules for the Library's uploaded files (Settings > Library admin).
-// Anyone can read a file or the index by its exact path, so students can list and download. Nobody can list the pieces collection, which
-// stops a script from walking through every stored piece to use up the free daily reads.
-//
-// Who can add, change or delete:
-//   * the OWNER: the email in isOwner() below. Changing the owner means editing this file and publishing it:
-//       firebase deploy --only firestore:rules
-//   * the ADMINS: other Google accounts, added and removed by the owner on the Library admin page (stored in the `admins` collection,
-//     one document per lower-case email). Adding a helper needs no edit here and no deploy.
-// Admins cannot add or remove admins; only the owner can. Both must sign in with a verified Google email.
+// Anyone can fetch a document, so students can download. Only the owner (the address below) and the helpers the owner adds on the Library
+// admin page can add, change or delete. EDIT the owner address if it changes, then publish with:  firebase deploy --only firestore:rules
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
-    }
+    // The owner: the one address fixed here. Only the owner can see or change the helper list below.
     function isOwner() {
-      return signedIn() && request.auth.token.email in ['andereya8@gmail.com'];
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in ['andereya8@gmail.com'];
     }
-    // The owner is checked first, so the owner's writes never need the extra lookup.
+
+    // The owner, or a helper in either collection (admins is retained for existing deployments).
     function isAdmin() {
       return isOwner()
-        || (signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.token.email.lower())));
+        || (request.auth != null
+          && request.auth.token.email_verified == true
+          && (exists(/databases/$(database)/documents/libraryAdmins/$(request.auth.token.email.lower()))
+            || exists(/databases/$(database)/documents/admins/$(request.auth.token.email.lower()))));
     }
 
-    // The helpers. Only the owner can see the whole list or change it. A helper can read their own document, to see that they are one.
-    match /admins/{email} {
-      allow get: if isOwner() || (signedIn() && request.auth.token.email.lower() == email);
-      allow list: if isOwner();
+    // Owner-managed helper lists. Keep the old collection readable/manageable during the transition.
+    match /libraryAdmins/{email} {
+      allow read, delete: if isOwner();
       allow create, update: if isOwner() && email == email.lower() && request.resource.data.keys().hasOnly(['added']);
-      allow delete: if isOwner();
+    }
+    match /admins/{email} {
+      allow read, delete: if isOwner();
+      allow create, update: if isOwner() && email == email.lower() && request.resource.data.keys().hasOnly(['added']);
     }
 
-    // The index (library/index, index-1, ...), the section > class > subject catalog and the cleanup list.
+    // One small document lists every uploaded file, so a page view costs one read.
     match /library/{doc} {
       allow get: if true;
       allow write: if isAdmin();

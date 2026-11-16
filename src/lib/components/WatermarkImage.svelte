@@ -14,7 +14,7 @@
   interface Row { name: string; filename: string; url?: string; bytes?: number; note?: string; blob?: Blob }
   let files = $state<File[]>([]);
   let sample = $state.raw<HTMLCanvasElement | null>(null);      // first photo, small, for the preview
-  let kind = $state<'text' | 'logo'>('text'), text = $state('© Your name'), color = $state('#ffffff'), outline = $state(true);
+  let kind = $state<'text' | 'logo'>('text'), text = $state(''), color = $state('#ffffff'), outline = $state(true);
   let logo = $state.raw<HTMLCanvasElement | null>(null); let logoName = $state('');
   let pos = $state<Pos>('br'), sizePct = $state(30), opacity = $state(60), angle = $state(0), margin = $state(3), gap = $state(60);
   let fmt = $state('keep'), quality = $state(92);
@@ -103,7 +103,7 @@
 <div class="controls">
   <label>Type<select bind:value={kind}><option value="text">Text</option><option value="logo">Logo or picture</option></select></label>
   {#if kind === 'text'}
-    <label>Text<textarea rows="2" bind:value={text}></textarea></label>
+    <label>Text<textarea rows="2" placeholder="Type your name, for example © Jane 2026" bind:value={text}></textarea></label>
     <label>Text colour<input type="color" bind:value={color} /></label>
     <label class="chk"><input type="checkbox" bind:checked={outline} /> Thin outline so it stays readable</label>
   {/if}

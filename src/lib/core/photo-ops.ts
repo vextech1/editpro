@@ -4,7 +4,9 @@ import type { Rect } from './redact.ts';
 
 /** Largest picture the editor will make, so a typo (say 40000 px) cannot freeze the tab. */
 export const MAX_OUT_SIDE = 8000, MAX_OUT_PIXELS = 40_000_000;
-export const withinLimits = (w: number, h: number) => w >= 1 && h >= 1 && w <= MAX_OUT_SIDE && h <= MAX_OUT_SIDE && w * h <= MAX_OUT_PIXELS;
+/** Smallest side the editor will make, so a 0 or a stray digit cannot quietly produce a 1 × 1 picture. */
+export const MIN_OUT_SIDE = 16;
+export const withinLimits = (w: number, h: number) => w >= MIN_OUT_SIDE && h >= MIN_OUT_SIDE && w <= MAX_OUT_SIDE && h <= MAX_OUT_SIDE && w * h <= MAX_OUT_PIXELS;
 
 /** Size of a preview of a w × h picture whose long side is at most `max`, and the scale used. */
 export function previewSize(w: number, h: number, max: number) {

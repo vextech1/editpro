@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
 import { PDFDocument } from 'pdf-lib';
-import { baseName, fmtBytes, scaleTo } from '../src/lib/core/format';
+import { baseName, editedName, fmtBytes, scaleTo } from '../src/lib/core/format';
 import { imagesToPdf, layout, mergePdfs, UnreadablePdfError } from '../src/lib/core/pdf';
 import { tools, toolBySlug } from '../src/lib/tools';
 import { Library, MemoryStore, kindOf, matchesAccept, TRASH_DAYS } from '../src/lib/core/library';
@@ -354,5 +354,15 @@ describe('library full-text search', () => {
   it('works without an extractor (name search only)', async () => {
     const lib = mk(); await lib.save('notes.pdf', pdf('words')); expect(await lib.indexPending()).toBe(0);
     expect((await lib.search({ text: 'notes' })).length).toBe(1); expect((await lib.search({ text: 'words' })).length).toBe(0);
+  });
+});
+
+
+describe('editedName', () => {
+  it('adds -edited once and keeps the new extension', () => {
+    expect(editedName('80245.jpg', 'jpg')).toBe('80245-edited.jpg');
+    expect(editedName('80245-edited.jpg', 'png')).toBe('80245-edited.png');
+    expect(editedName('my.holiday.photo.png', 'webp')).toBe('my.holiday.photo-edited.webp');
+    expect(editedName('noext', 'jpg')).toBe('noext-edited.jpg');
   });
 });

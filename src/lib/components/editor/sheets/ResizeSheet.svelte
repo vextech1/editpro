@@ -10,7 +10,7 @@
   import type { SheetProps } from '../sheet-types.ts';
   import { GROUPS, PRESETS, describeSize, presetById, toMm, type Unit } from '#lib/core/presets.ts';
   import { fitRect, renderFit, type FitMode } from '#lib/core/resize.ts';
-  import { previewSize, targetPx, linkedSide, panBy, withinLimits, MAX_OUT_SIDE } from '#lib/core/photo-ops.ts';
+  import { previewSize, targetPx, linkedSide, panBy, withinLimits, MAX_OUT_SIDE, MIN_OUT_SIDE } from '#lib/core/photo-ops.ts';
   import '../sheet.css';
 
   let { base, prev, view, busy, onapply, oncancel, outDims = $bindable(null) }: SheetProps = $props();
@@ -29,6 +29,7 @@
   const inGroup = $derived(PRESETS.filter((p) => p.group === group));
   const px = $derived(targetPx({ preset, w: num(cw), h: num(ch), unit, dpi: num(dpi) || 300, srcW: base.width, srcH: base.height }));
   const ok = $derived(withinLimits(px.w, px.h));
+  const tooSmall = $derived(px.w < MIN_OUT_SIDE || px.h < MIN_OUT_SIDE);
   const physical = $derived(!preset && unit !== 'px' && unit !== '%');
   const info = $derived(fitRect(base.width, base.height, px.w, px.h, mode, zoom / 100, panX, panY));
   const enlarged = $derived(info.scale > 1.05);
@@ -42,7 +43,9 @@
   function choose(id: string) { presetId = id; confirmed = false; panX = 0; panY = 0; zoom = 100; if (presetById(id)?.group === GROUPS[0]) mode = 'fill'; }
   function side(which: 'w' | 'h') {
     if (!lock) return;
-    const r = linkedSide(which, num(cw) || 1, num(ch) || 1, unit === '%' ? 1 : base.width / base.height); cw = r.w; ch = r.h;
+    const r = linkedSide(which, num(cw) || 1, num(ch) || 1, unit === '%' ? 1 : base.width / base.height);
+    const whole = (n: number) => (unit === 'px' ? Math.round(n) : n);   // pixels are whole numbers, so show 1333, not 1333.33
+    cw = whole(r.w); ch = whole(r.h);
   }
   /** Changing the unit keeps the same size, written in the new unit. */
   function setUnit(u: string) {
@@ -95,7 +98,7 @@
   <p class="sh-hint">{px.w} × {px.h} px{#if preset} · {describeSize(preset.w, preset.h, preset.unit)}{:else if physical && num(cw) && num(ch)} · {describeSize(num(cw), num(ch), unit as Unit)}{/if}</p>
   {#if preset?.note}<p class="sh-hint">{preset.note}</p>{/if}
   {#if preset?.maxKB}<p class="sh-hint">Saved as JPG and kept under {preset.maxKB} KB{#if preset.minKB} (the form also wants at least {preset.minKB} KB){/if}.</p>{/if}
-  {#if !ok}<p class="sh-warn" role="alert">That is bigger than the editor can make. Keep each side under {MAX_OUT_SIDE} px.</p>{/if}
+  {#if !ok}<p class="sh-warn" role="alert">{tooSmall ? `That is too small to be a useful picture. Make each side at least ${MIN_OUT_SIDE} px.` : `That is bigger than the editor can make. Keep each side under ${MAX_OUT_SIDE} px.`}</p>{/if}
   {#if ok && enlarged}<p class="sh-warn">This makes the photo larger than it is, so it may look soft.</p>{/if}
 
   <Chips items={FITS} value={mode} onpick={(m) => { mode = m; panX = 0; panY = 0; }} label="How the photo fits" />

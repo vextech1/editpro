@@ -24,7 +24,7 @@
     const s = src, list = boxes.map((b) => ({ ...b })), d = draft;
     if (!s || !view) return;
     const k = Math.min(1, PREVIEW / Math.max(s.width, s.height)), pw = Math.round(s.width * k), ph = Math.round(s.height * k);
-    view.width = pw; view.height = ph; const ctx = view.getContext('2d')!; ctx.drawImage(s, 0, 0, pw, ph);
+    view.width = pw; view.height = ph; const ctx = view.getContext('2d', { willReadFrequently: true })!; ctx.drawImage(s, 0, 0, pw, ph);
     if (list.length) {
       const id = ctx.getImageData(0, 0, pw, ph);
       for (const b of list) applyRedaction(id.data, pw, ph, { x: b.r.x * k, y: b.r.y * k, w: b.r.w * k, h: b.r.h * k }, b.kind, b.strength);

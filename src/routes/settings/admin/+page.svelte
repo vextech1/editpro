@@ -2,14 +2,15 @@
   import { onMount } from 'svelte';
   import { SITE } from '#lib/site.ts';
   import { fmtBytes } from '#lib/core/format.ts';
-  import { checkAdminEmail } from '#lib/core/admins.ts';
   import { ALLOWED_EXT, CATEGORIES, type CategoryId } from '#lib/core/class-library.ts';
   import {
-    CLOUD_MAX_BYTES, STORAGE_LIMIT_BYTES, SPARK_STORAGE_BYTES, checkCloudUpload, checkStorage, chooseShard, cloudForSubject, duplicateOf, entryBytesFor, sameNameAs, storageUsed, deleteCloud, deleteTree, emptyTrash, friendlyCloudError, uploadCloud, type CloudFile, type TrashItem
+    CLOUD_MAX_BYTES, SPARK_STORAGE_BYTES, checkCloudUpload, checkStorage, chooseShard, cloudForSubject, deleteCloud, deleteTree, duplicateOf, emptyTrash,
+    entryBytesFor, friendlyCloudError, sameNameAs, storageUsed, uploadCloud, type CloudFile, type TrashItem
   } from '#lib/core/cloud-library.ts';
+  import { isValidEmail, normalizeEmail } from '#lib/core/admins.ts';
   import {
-    adminAddAdmin, adminLibraryStructure, adminList, adminListAdmins, adminRemoveAdmin, adminSaveLibraryStructure, adminTrash, adminSignIn, adminSignOut, adminStore, cloudEnabled,
-    watchAdmin, forgetCloudList, type AdminSession
+    adminAddAdmin, adminLibraryStructure, adminList, adminListAdmins, adminRemoveAdmin, adminSaveLibraryStructure, adminSignIn, adminSignOut, adminStore,
+    adminTrash, cloudEnabled, watchAdmin, forgetCloudList, type AdminSession
   } from '#lib/cloud/firebase.ts';
   import {
     addClass, addSection, addSubject, deleteClass, deleteSection, deleteSubject, newLibraryId,
@@ -21,10 +22,11 @@
   let session = $state<AdminSession | null>(null);
   let ready = $state(false);
   let all = $state<CloudFile[]>([]);
-  let trash = $state<TrashItem[]>([]);
-  let shardSizes = $state<number[]>([0]);
-  let helpers = $state<string[] | null>(null);     // the helper admins; null when this account is not the owner, which hides the panel
-  let helperInput = $state('');
+  let shardSizes = $state<number[]>([0]);       // bytes used in each index document, so a new file goes where there is room
+  let trashItems = $state<TrashItem[]>([]);     // pieces that may still need deleting (they still use storage)
+  let helpers = $state<string[] | null>(null);  // the helper admins; null for anyone but the owner
+  let newAdmin = $state('');
+  let tidied = false;
   let structure = $state<LibraryStructure>([]);
   let sectionId = $state(''); let classId = $state(''); let subjectId = $state('');
   let category = $state<CategoryId>('notes');
@@ -43,49 +45,44 @@
   const inSubject = $derived(cloudForSubject(all, sectionId, classId, subjectId));
   const files = $derived(inSubject.filter((file) => file.category === category).sort((a, b) => a.title.localeCompare(b.title, 'en', { numeric: true })));
   const catLabel = $derived(CATEGORIES.find((c) => c.id === category)?.label ?? '');
-  // Two picked files with the same name would replace each other, so only the first is kept and the rest are refused with a reason.
-  const checks = $derived.by(() => {
-    const dups = duplicateOf(picked.map((f) => f.name));
-    return picked.map((f, i) => {
-      const first = dups[i];
-      const result = first === null ? checkCloudUpload(f.name, f.size) : { ok: false as const, reason: `another file you picked already has this name (${picked[first].name}). Rename one of them first` };
-      return { file: f, result };
-    });
-  });
+  const checks = $derived(picked.map((f) => ({ file: f, result: checkCloudUpload(f.name, f.size) })));
   const good = $derived(checks.filter((c) => c.result.ok).map((c) => c.file));
-  const used = $derived(storageUsed(all, trash));
-  const room = $derived(checkStorage(used, good.map((f) => f.size)));
-  const nearlyFull = $derived(used >= STORAGE_LIMIT_BYTES * 0.8);
+  const used = $derived(storageUsed(all, trashItems));
 
-  const LEFTOVER_HINT = ' Any pieces left behind are cleaned up automatically the next time this page loads.';
   const fail = (e: unknown) => { problem = friendlyCloudError((e as { code?: string })?.code, ''); note = ''; };
   const countIn = (id: CategoryId) => inSubject.filter((file) => file.category === id).length;
 
   async function refresh() {
-    const [index, sections, pending] = await Promise.all([adminList(), adminLibraryStructure(), adminTrash().catch(() => trash)]);
-    const files = index.files; shardSizes = index.shardSizes;
-    all = files; structure = sections; trash = pending; forgetCloudList();
-    void cleanLeftovers(new Set(files.map((file) => file.id)));
+    // adminList throws when part of the index cannot be read: better to stop than to show (or change) a Library with files missing.
+    const [index, sections, trash] = await Promise.all([adminList(), adminLibraryStructure(), adminTrash().catch(() => trashItems)]);
+    all = index.files; shardSizes = index.shardSizes.length ? index.shardSizes : [0]; structure = sections; trashItems = trash; forgetCloudList();
+    void tidy();
   }
 
-  /** Reads the Library fresh, so a change made from another device is seen before anything is added or deleted here. */
-  async function freshIndex() {
-    const index = await adminList();
-    all = index.files; shardSizes = index.shardSizes;
-    return index;
-  }
-
-  // Pieces left behind by an upload or delete that failed partway are removed here, so they stop using the free storage.
-  let cleaning = false;
-  async function cleanLeftovers(liveIds: ReadonlySet<string>) {
-    if (cleaning) return;
-    cleaning = true;
+  /** Once per visit: remove pieces left behind by an upload or delete that was cut short. Files that are still listed are never touched. */
+  async function tidy() {
+    if (tidied || !trashItems.length) return;
+    tidied = true;
     try {
-      const { cleaned } = await emptyTrash(await adminStore(), liveIds);
-      if (cleaned) trash = await adminTrash().catch(() => trash);
-      if (cleaned && !note && !problem) note = `Cleaned up leftover pieces from ${cleaned} earlier ${cleaned === 1 ? 'upload or delete' : 'uploads or deletes'} that did not finish.`;
-    } catch { /* tried again the next time this page loads */ }
-    finally { cleaning = false; }
+      const r = await emptyTrash(await adminStore(), new Set(all.map((f) => f.id)));
+      if (r.cleaned || r.failed === 0) trashItems = await adminTrash();
+    } catch { tidied = false; }   // try again at the next refresh
+  }
+
+  async function loadHelpers() { try { helpers = await adminListAdmins(); } catch { helpers = null; } }
+  async function addHelper() {
+    const email = normalizeEmail(newAdmin);
+    if (!isValidEmail(email)) { problem = 'Type a full email address, like name@gmail.com.'; note = ''; return; }
+    if (helpers?.includes(email)) { note = `${email} is already an admin.`; problem = ''; return; }
+    busy = true; problem = ''; note = ''; step = 'Adding';
+    try { await adminAddAdmin(email); newAdmin = ''; await loadHelpers(); note = `${email} can now add and delete Library files once they sign in with that Google account.`; }
+    catch (e) { fail(e); } finally { busy = false; step = ''; }
+  }
+  async function removeHelper(email: string) {
+    if (!confirm(`Remove ${email}? They will no longer be able to change the Library.`)) return;
+    busy = true; problem = ''; note = ''; step = 'Removing';
+    try { await adminRemoveAdmin(email); await loadHelpers(); note = `${email} was removed.`; }
+    catch (e) { fail(e); } finally { busy = false; step = ''; }
   }
 
   onMount(() => {
@@ -93,26 +90,10 @@
     let stop = () => {};
     void watchAdmin((s) => {
       session = s; ready = true;
-      if (s) { refresh().catch(fail); adminListAdmins().then((list) => (helpers = list)).catch(() => (helpers = null)); }
-      else { all = []; structure = []; trash = []; helpers = null; }
+      if (s) { refresh().catch(fail); void loadHelpers(); } else { all = []; structure = []; trashItems = []; helpers = null; tidied = false; }
     }).then((f) => (stop = f)).catch((e) => { fail(e); ready = true; });
     return () => stop();
   });
-
-  async function addHelper(event: SubmitEvent) {
-    event.preventDefault();
-    const check = checkAdminEmail(helperInput, helpers ?? [], session?.email);
-    if (!check.ok) { problem = check.reason; note = ''; return; }
-    busy = true; step = 'Adding'; problem = ''; note = '';
-    try { await adminAddAdmin(check.email); helpers = await adminListAdmins(); helperInput = ''; note = `${check.email} can now add and delete Library files.`; }
-    catch (e) { fail(e); } finally { busy = false; step = ''; }
-  }
-  async function removeHelper(email: string) {
-    if (!confirm(`Remove ${email}? They will not be able to add or delete files any more.`)) return;
-    busy = true; step = 'Removing'; problem = ''; note = '';
-    try { await adminRemoveAdmin(email); helpers = await adminListAdmins(); note = `${email} is no longer an admin.`; }
-    catch (e) { fail(e); } finally { busy = false; step = ''; }
-  }
 
   async function signIn() { busy = true; problem = ''; step = 'Signing in'; try { await adminSignIn(); } catch (e) { fail(e); } finally { busy = false; step = ''; } }
   async function signOut() { try { await adminSignOut(); } catch (e) { fail(e); } picked = []; note = ''; }
@@ -152,64 +133,56 @@
   async function removeLevel(level: 'section' | 'class' | 'subject') {
     const target = level === 'section' ? section : level === 'class' ? cls : subject;
     if (!target) return;
-    busy = true; step = 'Checking the Library'; note = ''; problem = '';
-    let victims: CloudFile[];
-    try {
-      const index = await freshIndex();      // files added from another device must be included, or they would be left behind with no section
-      victims = index.files.filter((file) => file.section === sectionId
-        && (level === 'section' || file.cls === classId)
-        && (level !== 'subject' || file.subject === subjectId));
-    } catch (e) { fail(e); busy = false; step = ''; return; }
+    const victims = all.filter((file) => file.section === sectionId
+      && (level === 'section' || file.cls === classId)
+      && (level !== 'subject' || file.subject === subjectId));
     const detail = victims.length ? ` This also permanently deletes ${victims.length} uploaded ${victims.length === 1 ? 'file' : 'files'}.` : '';
-    if (!confirm(`Delete ${level} “${target.name}” and everything inside it?${detail}`)) { busy = false; step = ''; return; }
-    step = 'Deleting';
+    if (!confirm(`Delete ${level} “${target.name}” and everything inside it?${detail}`)) return;
+    busy = true; step = 'Deleting'; note = ''; problem = '';
     try {
       const next = level === 'section' ? deleteSection(structure, sectionId)
         : level === 'class' ? deleteClass(structure, sectionId, classId)
           : deleteSubject(structure, sectionId, classId, subjectId);
-      // One all-or-nothing write removes the catalog entry and every file in it; the pieces are then cleared (see deleteTree).
-      const { leftovers } = await deleteTree(await adminStore(), victims, next);
+      // The new catalog and the removal of every file go in as one all-or-nothing write, so students never see a catalog pointing at missing files.
+      let leftovers = 0;
+      if (victims.length) leftovers = (await deleteTree(await adminStore(), victims, next)).leftovers;
+      else await adminSaveLibraryStructure(next);
       structure = next; all = all.filter((file) => !victims.some((victim) => victim.id === file.id));
       if (level === 'section') { sectionId = ''; classId = ''; subjectId = ''; }
       else if (level === 'class') { classId = ''; subjectId = ''; }
       else subjectId = '';
-      editor = null; note = `Deleted ${target.name}.${leftovers ? ` ${leftovers === 1 ? 'One file\'s' : `${leftovers} files'`} storage will be freed automatically the next time this page loads.` : ''}`;
-    } catch (e) {
-      fail(e); problem += ' This delete is all-or-nothing, so the page now shows what is really still there. You can try again.';
-      try { await refresh(); } catch { /* keep the last list */ }     // the answer may have been lost after the write went through
-    } finally { busy = false; step = ''; }
+      editor = null; note = `Deleted ${target.name}.${leftovers ? ` The stored data of ${leftovers} ${leftovers === 1 ? 'file' : 'files'} will be cleaned up automatically the next time this page opens.` : ''}`;
+    } catch (e) { fail(e); }
+    finally { busy = false; step = ''; }
   }
 
   async function upload() {
     if (!good.length || !subject) return;
-    const batch = [...good]; const where = { section: sectionId, cls: classId, subject: subjectId, category };
-    busy = true; step = 'Checking the Library'; problem = ''; note = '';
-    // The Library is read fresh first: a file added or replaced from another device must count for the room check and the replace check.
-    let here: CloudFile[];
-    try {
-      const index = await freshIndex();
-      const left = checkStorage(storageUsed(index.files, trash), batch.map((f) => f.size));
-      if (!left.ok) { problem = left.reason + '.'; busy = false; step = ''; return; }
-      here = cloudForSubject(index.files, where.section, where.cls, where.subject).filter((x) => x.category === where.category);
-    } catch (e) { fail(e); busy = false; step = ''; return; }
-    const same = batch.filter((f) => sameNameAs(here, f.name).length);
-    if (same.length && !confirm(`${same.map((f) => f.name).join(', ')} already ${same.length === 1 ? 'exists' : 'exist'} here. Replace ${same.length === 1 ? 'it' : 'them'}?`)) { busy = false; step = ''; return; }
+    // Two picked files whose names differ only in capitals would replace each other, so the later one is left out.
+    const repeat = duplicateOf(good.map((f) => f.name));
+    const batch = good.filter((_, i) => repeat[i] === null);
+    const skipped = good.length - batch.length;
+    const room = checkStorage(used, batch.map((f) => f.size));
+    if (!room.ok) { problem = room.reason; note = ''; return; }
+    const same = batch.filter((f) => sameNameAs(files, f.name).length);
+    if (same.length && !confirm(`${same.map((f) => f.name).join(', ')} already ${same.length === 1 ? 'exists' : 'exist'} here. Replace ${same.length === 1 ? 'it' : 'them'}?`)) return;
+    busy = true; problem = ''; note = '';
     let added = 0;
     try {
       const store = await adminStore();
-      const sizes = [...shardSizes];      // how full each index document is, kept up to date as this batch goes in
+      const sizes = [...shardSizes];   // kept up to date as files are added, so the next one lands in an index document with room
       for (const [i, file] of batch.entries()) {
         const label = `${file.name} (${i + 1} of ${batch.length})`;
         step = `Uploading ${label}`;
-        const bytes = entryBytesFor(file.name); const shard = chooseShard(sizes, bytes);
-        // A file with the same name here is replaced in one step: the new copy goes in and the old one comes out together.
-        const replaces = sameNameAs(here, file.name).map((x) => ({ id: x.id, parts: x.parts, shard: x.shard }));
-        await uploadCloud(store, new Uint8Array(await file.arrayBuffer()), { name: file.name, ...where, shard, shardCount: sizes.length, replaces },
+        const entryBytes = entryBytesFor(file.name);
+        const shard = chooseShard(sizes, entryBytes);
+        const replaces = sameNameAs(files, file.name).map((old) => ({ id: old.id, parts: old.parts, shard: old.shard ?? 0 }));
+        // New copy in and old copy out happen as one write, so students never see two copies or none.
+        await uploadCloud(store, new Uint8Array(await file.arrayBuffer()), { name: file.name, section: sectionId, cls: classId, subject: subjectId, category, shard, shardCount: sizes.length, replaces },
           (d, t) => (step = `Uploading ${label}: ${d} of ${t} parts`));
-        if (shard === sizes.length) sizes.push(bytes); else sizes[shard] += bytes;
-        added++;
+        added++; sizes[shard] = (sizes[shard] ?? 0) + entryBytes;
       }
-      note = `Added ${added} ${added === 1 ? 'file' : 'files'} to ${subject.name} › ${catLabel}. Students see it straight away.`;
+      note = `Added ${added} ${added === 1 ? 'file' : 'files'} to ${subject.name} › ${catLabel}. Students see it straight away.${skipped ? ` ${skipped} with a repeated name ${skipped === 1 ? 'was' : 'were'} left out.` : ''}`;
       clearPick();
     } catch (e) {
       fail(e);
@@ -220,13 +193,8 @@
   async function remove(f: CloudFile) {
     if (!confirm(`Delete "${f.title}" from ${subject?.name} › ${catLabel}? Students will not be able to download it any more.`)) return;
     busy = true; problem = ''; note = ''; step = 'Deleting';
-    try {
-      // Fresh look first: if it was already deleted from another device there is nothing to do, and the part count comes from the real entry.
-      const current = (await freshIndex()).files.find((x) => x.id === f.id);
-      if (current) { await deleteCloud(await adminStore(), current.id, current.parts, current.shard); note = `Deleted ${f.title}.`; }
-      else note = `${f.title} was already deleted.`;
-    }
-    catch (e) { fail(e); problem += LEFTOVER_HINT; }
+    try { await deleteCloud(await adminStore(), f.id, f.parts, f.shard ?? 0); note = `Deleted ${f.title}.`; }
+    catch (e) { fail(e); }
     finally { try { await refresh(); } catch { /* keep the last list */ } busy = false; step = ''; }
   }
 </script>
@@ -248,7 +216,7 @@
   {:else if !session}
     <section class="card">
       <h2>Sign in</h2>
-      <p class="muted">Sign in with the admin Google account. Only the owner account and the admins the owner has added can add or delete files; everyone else can only download.</p>
+      <p class="muted">Sign in with an admin Google account. Only the owner (the email in <code>firestore.rules</code>) and the helpers the owner adds here can add or delete files; everyone else can only download.</p>
       <button class="btn" type="button" onclick={signIn} disabled={busy}>{busy ? 'Signing in…' : 'Sign in with Google'}</button>
     </section>
   {:else}
@@ -330,14 +298,13 @@
           <p class="muted small">Up to {fmtBytes(CLOUD_MAX_BYTES)} each. For bigger files, use a Google Drive link instead.</p>
           {#if checks.length}
             <ul class="picked">
-              {#each checks as c, i (i + ':' + c.file.name)}
+              {#each checks as c (c.file.name + c.file.size)}
                 <li class:bad={!c.result.ok}>{c.file.name} <span class="muted">{fmtBytes(c.file.size)}</span>
                   {#if !c.result.ok}<div class="why">Not added: {c.result.reason}.</div>{/if}</li>
               {/each}
             </ul>
           {/if}
-          {#if good.length && !room.ok}<div class="why">Not added: {room.reason}.</div>{/if}
-          <button class="btn" type="button" onclick={upload} disabled={busy || !good.length || !room.ok}>
+          <button class="btn" type="button" onclick={upload} disabled={busy || !good.length}>
             {good.length ? `Add ${good.length} ${good.length === 1 ? 'file' : 'files'} to ${catLabel}` : 'Add files'}
           </button>
         </div>
@@ -355,22 +322,22 @@
       <p class="muted">Add or choose a subject to upload and manage its files.</p>
     {/if}
 
-    <p class="muted small usage">Storage used: about {fmtBytes(used)} of {fmtBytes(SPARK_STORAGE_BYTES)} free. Uploads stop at {fmtBytes(STORAGE_LIMIT_BYTES)} to keep some room spare.</p>
+    <p class="muted small usage">Uploaded so far: {fmtBytes(used)} of about {fmtBytes(SPARK_STORAGE_BYTES)} free storage.</p>
+
     {#if helpers}
       <h2>Admins</h2>
-      <div class="card">
-        <p class="muted small">You are the owner. These Google accounts can also add and delete files. Only you can change this list.</p>
-        {#if helpers.length}
-          <ul class="rows">{#each helpers as email (email)}<li class="row"><span class="grow">{email}</span><button class="btn small danger" type="button" onclick={() => removeHelper(email)} disabled={busy}>Remove</button></li>{/each}</ul>
-        {:else}<p class="muted">No other admins yet.</p>{/if}
-        <form onsubmit={addHelper}>
-          <label for="helper-email">Add an admin (their Google email)</label>
-          <input id="helper-email" type="email" bind:value={helperInput} maxlength="254" autocomplete="off" placeholder="name@gmail.com" />
-          <button class="btn" disabled={busy || !helperInput.trim()}>Add admin</button>
-        </form>
-      </div>
+      <p class="muted small">Only you can see this. Helpers can add and delete Library files with their own Google account. They cannot change this list.</p>
+      {#if helpers.length}
+        <ul class="rows">
+          {#each helpers as email (email)}
+            <li class="row"><span class="grow">{email}</span><button class="btn small danger" type="button" onclick={() => removeHelper(email)} disabled={busy}>Remove</button></li>
+          {/each}
+        </ul>
+      {:else}<p class="muted">No helpers yet.</p>{/if}
+      <label for="new-admin">Add a helper</label>
+      <input id="new-admin" type="email" inputmode="email" autocomplete="off" placeholder="name@gmail.com" bind:value={newAdmin} />
+      <button class="btn" type="button" onclick={addHelper} disabled={busy || !newAdmin.trim()}>Add admin</button>
     {/if}
-    {#if nearlyFull}<p class="warn" role="status">Storage is nearly full. Delete files you no longer need, or put large ones on Google Drive and add a link instead.</p>{/if}
   {/if}
 
   <p role="status" aria-live="polite" class="muted status">{busy ? `${step || 'Working'}…` : ''}</p>
@@ -383,6 +350,7 @@
   h2 { margin: 22px 0 8px; font-size: 1.1rem; }
   label { display: block; font-weight: 600; margin: 12px 0 6px; }
   select, input[type='file'], input[type='email'] { display: block; box-sizing: border-box; width: 100%; font: inherit; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+  input[type='email'] { margin-bottom: 10px; }
   select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .card > .btn { margin-top: 14px; }
   .small { font-size: .88rem; margin: 8px 0 0; } .usage { margin-top: 22px; }

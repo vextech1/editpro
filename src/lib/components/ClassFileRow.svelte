@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fileViewerHref } from '#lib/core/cloud-library.ts';
-  import { categoryLabel, isRecent, shareLink, type ClassFile } from '#lib/core/class-library.ts';
+  import { categoryLabel, fmtAdded, isRecent, shareLink, type ClassFile } from '#lib/core/class-library.ts';
   import { fmtBytes } from '#lib/core/format.ts';
-  import { friendlyCloudError } from '#lib/core/cloud-library.ts';
+  import { downloadErrorMessage } from '#lib/core/cloud-library.ts';
   import { saveCloudFile } from '#lib/cloud/firebase.ts';
   /** pagePath: the class page this file is on, used for the Share link. */
   let { file, pagePath, classTitle = '', classHref = '' }: { file: ClassFile; pagePath: string; classTitle?: string; classHref?: string } = $props();
@@ -17,10 +17,10 @@
     if (!file.cloud || progress) return;
     failed = ''; progress = 'Preparing…';
     try { await saveCloudFile({ name: file.name, ext: file.ext, size: file.size, cloud: file.cloud }, (d, t) => (progress = t > 1 ? `Downloading ${Math.round((d / t) * 100)}%` : 'Downloading…')); }
-    catch (e) { failed = friendlyCloudError((e as { code?: string })?.code, 'The download did not finish. Please try again.'); }
+    catch (e) { failed = downloadErrorMessage(e); }
     finally { progress = ''; }
   }
-  const detail = $derived([categoryLabel(file.category), file.ext.toUpperCase(), fmtBytes(file.size), file.added].filter(Boolean).join(' · '));
+  const detail = $derived([categoryLabel(file.category), file.ext.toUpperCase(), fmtBytes(file.size), fmtAdded(file.added)].filter(Boolean).join(' · '));
   const viewerHref = $derived(file.cloud ? fileViewerHref(file.cloud.id) : '#');
 </script>
 
@@ -29,12 +29,14 @@
   <div class="grow">
     <a class="name" href={viewerHref}>{file.title}</a>
   {#if fresh} <span class="new">New</span>{/if}
-    <div class="sub">{#if classTitle}<a href={classHref}>{classTitle}</a><span aria-hidden="true"> · </span>{/if}<span>{detail}</span></div>
+    <div class="sub">{#if classTitle}<a href={classHref}>{classTitle}</a><span aria-hidden="true">&nbsp;·&nbsp;</span>{/if}<span>{detail}</span></div>
     {#if failed}<div class="sub err" role="alert">{failed}</div>{/if}
   </div>
+  <div class="actions">
   <a class="btn small" href={viewerHref} aria-label={`Open ${file.title}`}>Open</a>
   <a class="share" href={shareLink(file.title, pagePath)} target="_blank" rel="noopener noreferrer" aria-label={`Share ${file.title} on WhatsApp`}>Share</a>
-  <button class="btn small" type="button" onclick={getCloud} disabled={!!progress} aria-label={`Download ${file.title}`}>{progress || 'Download'}</button>
+  <button class="btn small" type="button" onclick={getCloud} disabled={!!progress} aria-label={`Download ${file.title}`}>{progress || (failed ? 'Try again' : 'Download')}</button>
+  </div>
 </li>
 
 <style>
@@ -44,6 +46,13 @@
   .sub a { color: var(--muted); }
   .btn { text-decoration: none; flex: none; }
   .new { font-size: .7rem; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; background: var(--accent); color: var(--accent-ink); padding: 1px 7px; border-radius: 999px; vertical-align: middle; }
+  .actions { display: flex; align-items: center; gap: 10px; flex: none; }
+  /* On a phone the title gets the full width and the buttons sit under it, instead of squeezing the name into a few letters. */
+  @media (max-width: 560px) {
+    :global(.row) { flex-wrap: wrap; }
+    :global(.row .grow) { flex-basis: calc(100% - 60px); }
+    .actions { flex: 1 0 100%; justify-content: flex-end; }
+  }
   .share { flex: none; color: var(--muted); font-size: .9rem; text-decoration: none; padding: 6px 4px; }
   .share:hover { color: var(--ink); text-decoration: underline; }
 </style>

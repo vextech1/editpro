@@ -39,7 +39,10 @@
     return {
       name: file.name, before: file.size, after: blob.size, url, blob,
       filename: baseName(file.name) + (mode === 'compress' ? '-compressed.' : '.') + (EXT[blob.type] ?? 'img'),
-      note: blob.type !== fmt ? `Your browser saved this as ${blob.type.replace('image/', '').toUpperCase()} instead.` : ''
+      note: [
+        blob.type !== fmt ? `Your browser saved this as ${blob.type.replace('image/', '').toUpperCase()} instead.` : '',
+        mode === 'compress' && blob.size >= file.size ? 'This is not smaller than the original. Try WebP, a lower quality, or a smaller longest side.' : ''
+      ].filter(Boolean).join(' ')
     };
   }
 
@@ -72,6 +75,7 @@
   <label>Longest side
     <select bind:value={max}><option value={0}>Original size</option><option value={3000}>3000 px</option><option value={2000}>2000 px</option><option value={1280}>1280 px</option><option value={800}>800 px</option></select></label>
 </div>
+{#if mode === 'compress' && fmt === 'image/png'}<p class="muted warn" role="note">PNG keeps every detail, so a photo usually gets bigger. Choose WebP or JPG to save space.</p>{/if}
 <button class="btn" type="button" disabled={!files.length || busy} onclick={run}>{mode === 'compress' ? 'Compress' : 'Convert'}</button>
 <p role="status" aria-live="polite" class="muted">{status}</p>
 {#if zip}<div style="margin-bottom:10px"><ResultRow name="All results" bytes={zip.bytes} url={zip.url} filename={mode === 'compress' ? 'compressed-images.zip' : 'converted-images.zip'} label="Download all (ZIP)" /></div>{/if}

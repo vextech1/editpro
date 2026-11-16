@@ -13,7 +13,10 @@
   async function pick(f: File[]) {
     msg = ''; mark = null; kept = [];
     try {
-      const c = await loadCanvas(f[0], MAX_SIDE, true); src = c;
+      const loaded = await loadCanvas(f[0], MAX_SIDE, true);
+      // A canvas made for reading single pixels: every tap reads one, so ask the browser to keep the pixels in memory.
+      const c = document.createElement('canvas'); c.width = loaded.width; c.height = loaded.height;
+      c.getContext('2d', { willReadFrequently: true })!.drawImage(loaded, 0, 0); loaded.width = 0; src = c;
       palette = extractPalette(c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data, 6);
       if (palette[0]) cur = palette[0];
     } catch { msg = 'That file could not be read as an image.'; }

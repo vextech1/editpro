@@ -119,6 +119,19 @@ export function listCloudFiles(): Promise<CloudFile[]> {
 }
 export const forgetCloudList = (): void => { listing = undefined; };
 
+/**
+ * Everything the Library page shows, in one go. Unlike listCloudFiles, a failure is thrown, so the page can tell
+ * "could not load" apart from "the Library really is empty". `partial` means some index parts could not be read.
+ */
+export async function loadLibraryData(): Promise<{ files: CloudFile[]; structure: LibraryStructure; partial: boolean }> {
+  const { fs, db } = await reader();
+  const [{ files, failed }, structure] = await Promise.all([
+    readIndex(async (name) => (await fs.getDoc(fs.doc(db, 'library', name))).data()),
+    fs.getDoc(fs.doc(db, ...STRUCTURE))
+  ]);
+  return { files, structure: parseLibraryStructure(structure.data()), partial: failed > 0 };
+}
+
 export async function getLibraryStructure(): Promise<LibraryStructure> {
   if (!cloudEnabled()) return [];
   try {
@@ -193,7 +206,13 @@ export async function adminSaveLibraryStructure(sections: LibraryStructure): Pro
 /** The helper admins, or null when this account is not the owner (only the owner may see or change the list). */
 export async function adminListAdmins(): Promise<string[] | null> {
   const { fs, db } = await admin();
-  try { return sortedAdmins((await fs.getDocs(fs.collection(db, ADMINS_COLLECTION))).docs.map((d) => d.id)); }
+  try {
+    const [current, legacy] = await Promise.all([
+      fs.getDocs(fs.collection(db, ADMINS_COLLECTION)),
+      fs.getDocs(fs.collection(db, 'admins'))
+    ]);
+    return sortedAdmins([...current.docs, ...legacy.docs].map((d) => d.id));
+  }
   catch (e) { if ((e as { code?: string }).code === 'permission-denied') return null; throw e; }
 }
 export async function adminAddAdmin(email: string): Promise<void> {
@@ -202,5 +221,9 @@ export async function adminAddAdmin(email: string): Promise<void> {
 }
 export async function adminRemoveAdmin(email: string): Promise<void> {
   const { fs, db } = await admin();
-  await fs.deleteDoc(fs.doc(db, ADMINS_COLLECTION, normalizeEmail(email)));
+  const id = normalizeEmail(email);
+  await Promise.all([
+    fs.deleteDoc(fs.doc(db, ADMINS_COLLECTION, id)),
+    fs.deleteDoc(fs.doc(db, 'admins', id))
+  ]);
 }

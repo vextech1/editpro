@@ -27,6 +27,11 @@ describe('collage layouts', () => {
     const l = limitLayout(rowLayout([2, 2, 2, 2, 2, 2], 4000, 0, 0), 12000);
     expect(Math.max(l.W, l.H)).toBeLessThanOrEqual(12000); expect(l.cells[5].x + l.cells[5].w).toBeLessThanOrEqual(l.W + 1);
     const small = gridLayout(2, 2, 1, 500, 0, 0); expect(limitLayout(small)).toBe(small);
+    // a tall stack of six wide photos used to come out 2000 × 9353; it now stays inside the editor's limits
+    const tall = limitLayout(columnLayout([1, 1, 1, 1, 1, 1].map(() => 1 / 1.4), 2000, 0, 0));
+    expect(Math.max(tall.W, tall.H)).toBeLessThanOrEqual(8000); expect(tall.W * tall.H).toBeLessThanOrEqual(40_000_000);
+    // area cap on its own: two huge squares side by side are scaled to fit 40 MP
+    const wide = limitLayout({ W: 7000, H: 7000, cells: [] }); expect(wide.W * wide.H).toBeLessThanOrEqual(40_000_000);
   });
 });
 

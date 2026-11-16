@@ -54,10 +54,10 @@ describe('cachedDownload', () => {
 
 describe('planEviction', () => {
   const items = [{ id: 'new', size: 60, at: 3 }, { id: 'old', size: 60, at: 1 }, { id: 'mid', size: 60, at: 2 }];
-  it('removes nothing while everything fits', () => { expect(planEviction(items, 180)).toEqual([]); });
+  it('removes nothing while everything fits', () => { expect(planEviction(items, 180, 'new')).toEqual([]); });
   it('removes the oldest copies first until the rest fit', () => {
-    expect(planEviction(items, 120)).toEqual(['old']);
-    expect(planEviction(items, 60)).toEqual(['old', 'mid']);
+    expect(planEviction(items, 120, 'new')).toEqual(['old']);
+    expect(planEviction(items, 60, 'new')).toEqual(['old', 'mid']);
   });
   it('never removes the copy just saved', () => { expect(planEviction([{ id: 'only', size: 500, at: 1 }], 100, 'only')).toEqual([]); });
   it('has a sensible default limit', () => { expect(FILE_CACHE_MAX_BYTES).toBeGreaterThan(20 * 1024 * 1024); });
@@ -67,7 +67,7 @@ describe('firestore rules', () => {
   it('lets anyone get, but not list, the index and the pieces', async () => {
     const { readFileSync } = await import('node:fs');
     const rules = readFileSync('firestore.rules', 'utf8');
-    expect(rules).not.toMatch(/allow read/);
     expect(rules.match(/allow get: if true;/g)?.length).toBe(2);
+    expect(rules).not.toMatch(/allow read: if true/);
   });
 });
