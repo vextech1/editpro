@@ -185,9 +185,16 @@
     void openInStudio(row.studio, row.tool.slug!, st.file).catch(() => { msg = 'Could not open that tool.'; });
   }
   function cancelTool() { tool = null; outDims = null; crop = null; adj = { ...NO_ADJUST }; }
+  // Tapping ✓ on a result that is the same as the photo closes the sheet, so say why nothing was added instead of closing silently.
+  const NOTHING = 'Nothing to apply: the photo would not change.';
+  let nothingTimer: ReturnType<typeof setTimeout> | undefined;
+  function nothingToApply() {
+    cancelTool(); msg = NOTHING;
+    clearTimeout(nothingTimer); nothingTimer = setTimeout(() => { if (msg === NOTHING) msg = ''; }, 3500);
+  }
   /** What every new sheet calls to save its picture as the next version. The sheet closes when the new version loads (or at once if nothing changed). */
   async function applyFromSheet(build: () => HTMLCanvasElement | Promise<HTMLCanvasElement>, label: string, o?: SaveOpts) {
-    await run(async () => { const c = await build(); try { const added = await save(c, label, o); if (!added) cancelTool(); } finally { c.width = 0; } });
+    await run(async () => { const c = await build(); try { const added = await save(c, label, o); if (!added) nothingToApply(); } finally { c.width = 0; } });
   }
   // Opening a photo tab that now lives in the editor (from the Tools page, a link or the Home page) opens its sheet.
   $effect(() => {
@@ -204,20 +211,22 @@
     });
   }
   async function applyAdjustTool() {
-    if (!base || isNeutral(adj)) return cancelTool();
+    if (!base) return cancelTool();
+    if (isNeutral(adj)) return nothingToApply();
     const b = base, a = { ...adj };
     await run(async () => {
       const full = copy(b), x = full.getContext('2d')!, d = x.getImageData(0, 0, full.width, full.height);
       applyAdjust(d.data, a); x.putImageData(d, 0, 0);
-      const added = await save(full, 'Adjust'); full.width = 0; if (!added) cancelTool();
+      const added = await save(full, 'Adjust'); full.width = 0; if (!added) nothingToApply();
     });
   }
   async function applyCropTool() {
-    if (!base || !crop || (crop.w === W && crop.h === H)) return cancelTool();
+    if (!base || !crop) return cancelTool();
+    if (crop.w === W && crop.h === H) return nothingToApply();
     const b = base, r = { ...crop };
     await run(async () => {
       const c = document.createElement('canvas'); c.width = r.w; c.height = r.h; c.getContext('2d')!.drawImage(b, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
-      const added = await save(c, 'Crop'); c.width = 0; if (!added) cancelTool();
+      const added = await save(c, 'Crop'); c.width = 0; if (!added) nothingToApply();
     });
   }
   function pickRatio(id: string) { ratioId = id; cropNote = ''; crop = fitAspect(W, H, aspectRatio(id, W, H)); }
