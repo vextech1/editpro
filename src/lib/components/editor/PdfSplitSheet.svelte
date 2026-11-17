@@ -8,6 +8,7 @@
   import { pdfBlob, pdfErrorMessage, zipBlob } from '#lib/core/files.ts';
   import { zipFiles } from '#lib/core/zip.ts';
   import { splitPartName } from '#lib/core/pdf-studio.ts';
+  import { useHistory } from '#lib/sheet-history.svelte.ts';
 
   // Cut this PDF into parts. A split makes several files, not a new version, so the parts are listed here to download or save.
   interface Out { name: string; bytes: number; url: string }
@@ -20,6 +21,11 @@
 
   function clear() { outs.forEach((o) => URL.revokeObjectURL(o.url)); if (zip) URL.revokeObjectURL(zip.url); outs = []; zip = null; status = ''; bad = false; }
   onDestroy(clear);
+  // Undo and Redo for the settings while nothing is split yet (typing a range is one step once you pause).
+  const hist = useHistory<{ mode: 'every' | 'ranges'; ranges: string }>({
+    capture: () => ({ mode, ranges }),
+    restore: (v) => { mode = v.mode; ranges = v.ranges; clear(); }
+  });
   async function apply() {
     if (busy) return;
     clear(); busy = true; status = 'Splitting…';
@@ -36,7 +42,7 @@
   }
 </script>
 
-<ToolSheet title="Split" onreset={() => { mode = 'every'; ranges = ''; clear(); }} onapply={apply} {oncancel} {busy} canReset={mode !== 'every' || ranges !== '' || outs.length > 0}>
+<ToolSheet title="Split" onreset={() => { mode = 'every'; ranges = ''; clear(); hist.reset(); }} onapply={apply} {oncancel} {busy} canReset={mode !== 'every' || ranges !== '' || outs.length > 0}>
   <p class="muted" style="margin-top:0">{name} has {pages} {pages === 1 ? 'page' : 'pages'}. {mode === 'every' ? 'Each page becomes its own PDF.' : 'Each comma-separated range becomes its own PDF.'}</p>
   <div class="controls sp">
     <label>Split by

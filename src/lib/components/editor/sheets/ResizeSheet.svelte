@@ -33,7 +33,7 @@
   const physical = $derived(!preset && unit !== 'px' && unit !== '%');
   const info = $derived(fitRect(base.width, base.height, px.w, px.h, mode, zoom / 100, panX, panY));
   const enlarged = $derived(info.scale > 1.05);
-  const changed = $derived(group !== 'Custom' || px.w !== W0 || px.h !== H0 || mode !== 'fill' || zoom !== 100);
+  const changed = $derived(group !== 'Custom' || px.w !== W0 || px.h !== H0 || unit !== 'px' || dpi !== 300 || !lock || mode !== 'fill' || zoom !== 100 || panX !== 0 || panY !== 0 || bg !== '#ffffff');
 
   function setGroup(g: string) {
     group = g; confirmed = false; panX = 0; panY = 0; zoom = 100;
@@ -54,7 +54,7 @@
     const r2 = (n: number) => Math.round(n * 100) / 100;
     cw = r2(conv(old.w, base.width)); ch = r2(conv(old.h, base.height)); unit = nu;
   }
-  function reset() { group = 'Custom'; presetId = ''; cw = W0; ch = H0; unit = 'px'; mode = 'fill'; zoom = 100; panX = 0; panY = 0; confirmed = false; }
+  function reset() { group = 'Custom'; presetId = ''; cw = W0; ch = H0; unit = 'px'; dpi = 300; lock = true; mode = 'fill'; zoom = 100; panX = 0; panY = 0; bg = '#ffffff'; confirmed = false; }
 
   // Live preview: the small copy, drawn at the new shape. The stage re-fits to it through outDims.
   $effect(() => {

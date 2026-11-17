@@ -2,8 +2,8 @@
 // spending the free daily reads). The browser side (Cache API) lives in cloud/firebase.ts; the decisions live here so they can be tested.
 
 export const FILE_CACHE_NAME = 'editpro-library-files-v1';
-/** The most this device keeps. Older copies are dropped first when a new one would go over. */
-export const FILE_CACHE_MAX_BYTES = 150 * 1024 * 1024;
+/** No limit of our own: the device keeps every copy until the browser's storage is full (then saving a copy quietly fails and the file still opens). */
+export const FILE_CACHE_MAX_BYTES = Infinity;
 
 /** Where copies are kept. Either call may fail (storage full, private mode); the download never depends on it. */
 export interface FileCache {

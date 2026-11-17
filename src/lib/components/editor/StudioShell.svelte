@@ -2,6 +2,8 @@
   /** One line shown over the bottom of the stage. `alert` makes screen readers announce it at once. */
   export interface ShellToast { text: string; alert?: boolean }
   export interface DockItem { id: string; label: string; icon: string; disabled?: boolean }
+  /** Undo and Redo for changes a sheet has not applied yet. Each press moves one step. */
+  export interface ShellHistory { canUndo: boolean; canRedo: boolean; undo: () => void; redo: () => void }
 </script>
 
 <script lang="ts">
@@ -18,7 +20,7 @@
   // A studio plugs in what is different: what the stage shows (`stage`), the dock items, its sheets (`sheet`) and a few extras.
   let {
     label, closeLabel, onclose,
-    downloadUrl = '', locked = false, historyLocked, busy = false,
+    downloadUrl = '', locked = false, historyLocked, history = null, busy = false,
     saved, saveLabel, oncopy, onremove,
     menu = $bindable(false), versions = $bindable(false), closeVersionsOnPick = false,
     stageLabel, zoomLabel: zoomGroupLabel, content, stageW = $bindable(0), stageH = $bindable(0), zoom = $bindable({ scale: 1, x: 0, y: 0 }), blockGestures = false, onswipe,
@@ -31,6 +33,7 @@
     downloadUrl?: string;                  // the download link in the top bar shows when this is set
     locked?: boolean;                      // a studio sheet is open: undo, redo and the dock step aside
     historyLocked?: boolean;               // undo and redo off; defaults to `locked`, pass false to keep them working under a sheet
+    history?: ShellHistory | null;         // a sheet's own step-by-step history: Undo and Redo use it instead of the saved versions, and stay on under the sheet
     busy?: boolean;
     saved: 'idle' | 'ok' | 'failed';
     saveLabel: string;                     // the Save to My files item's text
@@ -116,6 +119,9 @@
     const next = clampStage(zoom, { x: content.w, y: content.h }, { x: stageW, y: stageH });
     if (next.scale !== zoom.scale || next.x !== zoom.x || next.y !== zoom.y) zoom = next;
   });
+  // A sheet's own history wins while it is open; otherwise Undo and Redo walk the saved versions, and step aside under a sheet.
+  const canUndo = $derived(history ? history.canUndo : st.canUndo && !(historyLocked ?? locked));
+  const canRedo = $derived(history ? history.canRedo : st.canRedo && !(historyLocked ?? locked));
   function pickVersion(i: number) { if (closeVersionsOnPick) versions = false; void st.goTo(i); }
 </script>
 
@@ -125,8 +131,8 @@
   {@render leading?.()}
   <header class="top">
     <button class="ic" type="button" aria-label={closeLabel} onclick={onclose}><Icon name="back" /></button>
-    <button class="ic" type="button" aria-label="Undo" disabled={!st.canUndo || (historyLocked ?? locked) || busy} onclick={() => st.undo()}><Icon name="undo" /></button>
-    <button class="ic" type="button" aria-label="Redo" disabled={!st.canRedo || (historyLocked ?? locked) || busy} onclick={() => st.redo()}><Icon name="redo" /></button>
+    <button class="ic" type="button" aria-label="Undo" disabled={!canUndo || busy} onclick={() => (history ? history.undo() : st.undo())}><Icon name="undo" /></button>
+    <button class="ic" type="button" aria-label="Redo" disabled={!canRedo || busy} onclick={() => (history ? history.redo() : st.redo())}><Icon name="redo" /></button>
     <span class="grow"></span>
     <div class="zoom-controls" role="group" aria-label={zoomGroupLabel}>
       <button type="button" aria-label="Zoom out" disabled={zoom.scale <= 1} onclick={() => zoomBy(0.8)}>−</button>

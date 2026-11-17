@@ -70,8 +70,6 @@
   let menu = $state(false); let versions = $state(false);
   let group = $state<string | null>(null);   // the open dock group's sheet
   let allTools = $state(false);              // the All tools list
-  let groupBaseId = $state<string | null>(null);   // the version the Edit sheet opened on
-  let groupOwn = $state<string[]>([]);              // the versions Rotate and Flip made while it was open: the only ones its Reset may undo
   let backTo: string | null = null;         // where Back from a tool panel returns: a group id, ALL_TOOLS_ID, or nothing
   let stageW = $state(0); let stageH = $state(0);
   let dl = $state('');
@@ -202,8 +200,7 @@
       const sw = kind === 'rotate', c = document.createElement('canvas');
       c.width = sw ? b.height : b.width; c.height = sw ? b.width : b.height;
       const x = c.getContext('2d')!; x.translate(c.width / 2, c.height / 2); if (sw) x.rotate(Math.PI / 2); else x.scale(-1, 1);
-      x.drawImage(b, -b.width / 2, -b.height / 2); const added = await save(c, sw ? 'Rotate' : 'Flip'); c.width = 0;
-      const sn = st.session; if (added && group && sn) groupOwn = [...groupOwn, sn.versions[sn.head].id];
+      x.drawImage(b, -b.width / 2, -b.height / 2); await save(c, sw ? 'Rotate' : 'Flip'); c.width = 0;
     });
   }
   async function applyAdjustTool() {
@@ -234,15 +231,7 @@
   // Escape, when no menu or Versions sheet was open: close the topmost thing the editor itself is showing.
   function closeLayers() { if (panelSlug) leaveTool(); else if (allTools) allTools = false; else if (group) group = null; else if (tool) cancelTool(); }
   function leaveTool() { st.tab = HOME; if (backTo === ALL_TOOLS_ID) allTools = true; else if (backTo) openGroup(backTo); else group = null; }
-  function openGroup(id: string) { const sn = st.session; groupBaseId = sn ? (sn.versions[sn.head]?.id ?? null) : null; groupOwn = []; group = id; }
-  /** The Edit sheet's Reset undoes only the Rotate and Flip steps taken since it opened. Rotate and Flip are instant, so this is their reset;
-   *  versions made by any other tool are never touched. Redo still works afterwards. */
-  const baseIndex = $derived(st.session && groupBaseId ? st.session.versions.findIndex((v) => v.id === groupBaseId) : -1);
-  const canResetGroup = $derived.by(() => {
-    const sn = st.session; if (busy || !sn || baseIndex < 0 || baseIndex >= sn.head) return false;
-    return sn.versions.slice(baseIndex + 1, sn.head + 1).every((v) => groupOwn.includes(v.id));
-  });
-  async function resetGroup() { if (canResetGroup) await run(() => st.goTo(baseIndex)); }
+  function openGroup(id: string) { group = id; }
   function replacePicked() {
     const file = replaceInput.files?.[0];
     replaceInput.value = '';
@@ -273,8 +262,7 @@
 
 {#snippet sheet()}
   {#if group && groupDef}
-    <GroupSheet title={groupDef.label} tiles={groupTiles('image', groupDef.id, 'image')} onpick={pick} oncancel={() => (group = null)}
-      onreset={groupDef.id === 'edit' ? resetGroup : undefined} canReset={canResetGroup} />
+    <GroupSheet title={groupDef.label} tiles={groupTiles('image', groupDef.id, 'image')} onpick={pick} oncancel={() => (group = null)} />
   {:else if tool === 'adjust'}
     <ToolSheet title="Adjust" canReset={!isNeutral(adj)} onreset={() => (adj = { ...NO_ADJUST })} onapply={applyAdjustTool} oncancel={cancelTool} {busy}>
       <div class="pchips" role="group" aria-label="Look">

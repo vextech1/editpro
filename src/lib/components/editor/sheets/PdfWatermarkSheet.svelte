@@ -13,11 +13,14 @@
 
   // The PDF editor's Watermark sheet. Same controls as Photo Studio's: text or logo, position (nine spots or repeat), and
   // size / visible / turn / edge distance or spacing. The editor owns the draft and the logo so it can preview them on the page.
-  let { draft = $bindable(), logo = $bindable(), busy = false, onapply, oncancel }:
-    { draft: WatermarkDraft; logo: HTMLCanvasElement | null; busy?: boolean; onapply: () => void; oncancel: () => void } = $props();
+  let { draft = $bindable(), logo = $bindable(), busy = false, onreset, onapply, oncancel }:
+    { draft: WatermarkDraft; logo: HTMLCanvasElement | null; busy?: boolean; onreset?: () => void; onapply: () => void; oncancel: () => void } = $props();
   const KINDS = [{ id: 'text', label: 'Text' }, { id: 'logo', label: 'Logo' }] as const;
   const POS = [...POSITIONS, { id: 'tile', label: 'Repeat' }] as { id: Pos; label: string }[];
-  let logoName = $state(''), err = $state(''), param = $state('size');
+  let err = $state(''), param = $state('size');
+  // The name belongs to the picture, so Undo and Redo show the right one when they swap logos.
+  const names = new WeakMap<HTMLCanvasElement, string>();
+  const logoName = $derived(logo ? (names.get(logo) ?? '') : '');
 
   // The sliders: size, see-through and turn always; distance from the edge for one mark, space between for a repeat.
   const PARAMS = $derived([{ id: 'size', label: 'Size' }, { id: 'opacity', label: 'Visible' }, { id: 'angle', label: 'Turn' }, draft.pos === 'tile' ? { id: 'gap', label: 'Spacing' } : { id: 'margin', label: 'Edge distance' }]);
@@ -32,10 +35,10 @@
   async function pickLogo(e: Event & { currentTarget: HTMLInputElement }) {
     const input = e.currentTarget;   // the browser clears currentTarget once the handler has awaited, so keep our own reference
     const f = input.files?.[0]; if (!f) return;
-    try { logo = await loadCanvas(f, 1000); logoName = f.name; err = ''; } catch (error) { err = await imageFailed(error, f); }
+    try { const c = await loadCanvas(f, 1000); names.set(c, f.name); logo = c; err = ''; } catch (error) { err = await imageFailed(error, f); }
     input.value = '';
   }
-  function reset() { Object.assign(draft, defaultDraft()); logo = null; logoName = ''; param = 'size'; err = ''; }
+  function reset() { Object.assign(draft, defaultDraft()); logo = null; param = 'size'; err = ''; onreset?.(); }
 </script>
 
 <ToolSheet title="Watermark" canReset={changed} onreset={reset} {onapply} {oncancel} busy={busy || !ready}>

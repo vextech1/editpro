@@ -4,7 +4,7 @@
   import { onMount } from 'svelte';
   import { CATEGORIES, countLabel, filterFiles, libraryHref, sortFiles, type CategoryId } from '#lib/core/class-library.ts';
   import { toClassFile } from '#lib/core/cloud-library.ts';
-  import { listLiveUserFiles } from '#lib/cloud/user.ts';
+  import { forgetUserFiles, listLiveUserFiles } from '#lib/cloud/user.ts';
   import { openShare } from '#lib/cloud/member.svelte.ts';
   import { toUserClassFile, type UserFile } from '#lib/core/user-library.ts';
   import { useCloud } from '#lib/cloud/useCloud.svelte.ts';
@@ -61,6 +61,8 @@
   const categoryCounts = $derived(CATEGORIES.map((item) => ({ ...item, count: subjectFiles.filter((file) => file.category === item.id).length })));
   const hits = $derived(filterFiles(allFiles, { text, extra: (file) => file.classTitle }));
 
+  /** Ask Firebase for the newest lists now, instead of using the copies saved on this device. */
+  function refreshLists() { forgetUserFiles(); cloud.refresh(); studentRetry += 1; }
   const offline = $derived(typeof navigator !== 'undefined' && !navigator.onLine);
   const filesIn = (s: string, c = '', t?: string) => allFiles.filter((f) => f.sectionId === s && (!c || f.classId === c) && (t === undefined || f.subjectId === t)).length;
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -98,13 +100,16 @@
   <div class="card empty" role="alert">
     <h2>Couldn’t load the Library</h2>
     <p class="muted">{offline ? 'You appear to be offline. Connect to the internet and try again.' : 'Check your internet connection and try again.'}</p>
-    <button class="btn" type="button" onclick={cloud.load}>Try again</button>
+    <button class="btn" type="button" onclick={cloud.refresh}>Try again</button>
   </div>
 {:else if !cloud.state.loaded}
   <p class="muted" role="status">Loading Library…</p>
 {:else}
 {#if cloud.state.stale}
-  <p class="muted" role="status">{cloud.state.stale === 'saved' ? 'Showing the list saved on this device, because the latest one could not be loaded.' : 'Some files may be missing, because part of the list could not be loaded.'} <button class="link" type="button" onclick={cloud.load}>Try again</button></p>
+  <p class="muted" role="status">{cloud.state.stale === 'saved' ? 'Showing the list saved on this device, because the latest one could not be loaded.' : 'Some files may be missing, because part of the list could not be loaded.'} <button class="link" type="button" onclick={cloud.refresh}>Try again</button></p>
+{/if}
+{#if cloud.state.loaded && !cloud.state.stale}
+  <p class="muted" role="status">The list is kept on this device and updated every few hours. <button class="link" type="button" onclick={refreshLists}>Refresh now</button></p>
 {/if}
 {#if studentProblem}<p class="muted" role="status">{studentProblem} <button class="link" type="button" onclick={() => (studentRetry += 1)}>Try again</button></p>{/if}
 {#if missing}<p class="card note" role="status">That page is not in the Library any more. Here is the nearest one.</p>{/if}

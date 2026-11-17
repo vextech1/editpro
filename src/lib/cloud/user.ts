@@ -3,10 +3,11 @@ import { cloudEnabled, listCloudFiles, openFirebase, reader } from '#lib/cloud/f
 import { ENTRY_OVERHEAD_BYTES, PART_OVERHEAD_BYTES, STORAGE_LIMIT_BYTES, deleteAllParts, storageUsed } from '#lib/core/cloud-library.ts';
 import { parseNotices, type Notice } from '#lib/core/access.ts';
 import {
-  checkLibraryRoom, checkUserUpload, deleteUserFile, looksLikeExt, parseUserFile, sha256Hex, staleUploads, uploadUserFile, userPartId,
+  checkLibraryRoom, checkUserUpload, deleteUserFile, looksLikeExt, parseSavedUserFiles, parseUserFile, sha256Hex, staleUploads, uploadUserFile, userPartId,
   type UserFile, type UserMeta, type UserStore
 } from '#lib/core/user-library.ts';
 import { extOf } from '#lib/core/class-library.ts';
+import { browserListStore, forgetLists, forgetUnlocked, rememberUnlocked, savedOrLoad, wasUnlocked } from '#lib/core/list-cache.ts';
 
 export { cloudEnabled };
 type Opened = Awaited<ReturnType<typeof openFirebase>>;
@@ -49,11 +50,14 @@ export async function readAccountNumbers(uid: string): Promise<{ liveUploads: nu
 }
 export async function readAccessState(uid: string, fileId: string): Promise<AccessState> {
   if (cache.uid !== uid) { forgetAccess(); cache.uid = uid; }
+  // A file once unlocked stays unlocked: if this device already knows, ask Firebase nothing (the credit numbers only matter for a new unlock).
+  if (cache.unlocked.get(fileId) === true || wasUnlocked(browserListStore(), uid, fileId)) { cache.unlocked.set(fileId, true); return { unlocked: true, liveUploads: 0, used: 0 }; }
   const numbers = await (cache.numbers ??= readNumbers(uid).catch((error) => { cache.numbers = undefined; throw error; }));
   let unlocked = cache.unlocked.get(fileId);
   if (unlocked === undefined) {
     const { fs, db } = await member();
     unlocked = (await fs.getDoc(fs.doc(db, 'users', uid, 'unlocked', fileId))).exists(); cache.unlocked.set(fileId, unlocked);
+    if (unlocked) rememberUnlocked(browserListStore(), uid, fileId);
   }
   return { unlocked, ...numbers };
 }
@@ -66,37 +70,41 @@ export async function unlockFile(uid: string, fileId: string): Promise<void> {
     transaction.set(unlocked, { at: Date.now() });
     transaction.set(profile, { used: (Number(account.data()?.used) || 0) + 1 }, { merge: true });
   });
+  rememberUnlocked(browserListStore(), uid, fileId);
   forgetAccess();
 }
 
 const seen = new Map<string, Promise<UserFile[]>>();
+/** The live student files for a section/class/subject. Taken from the copy saved on this device while it is recent (no Firebase reads), otherwise one read per file. */
 export function listLiveUserFiles(section = '', cls = '', subject?: string): Promise<UserFile[]> {
   if (!cloudEnabled()) return Promise.resolve([]);
   const key = `${section}/${cls}/${subject ?? ''}`;
   let found = seen.get(key);
   if (!found) {
-    found = (async () => {
-      try {
-        const { fs, db } = await reader();
-        const filters = [fs.where('status', '==', 'live'), ...(section ? [fs.where('section', '==', section)] : []), ...(cls ? [fs.where('cls', '==', cls)] : []), ...(subject ? [fs.where('subject', '==', subject)] : [])];
-        const files: UserFile[] = []; let cursor: unknown;
-        while (true) {
-          const snap = await fs.getDocs(fs.query(fs.collection(db, 'userFiles'), ...filters, fs.limit(300), ...(cursor ? [fs.startAfter(cursor)] : [])));
-          files.push(...snap.docs.map((d) => parseUserFile(d.id, d.data())).filter((f): f is UserFile => f !== null));
-          if (snap.docs.length < 300) return files;
-          cursor = snap.docs.at(-1);
-        }
-      } catch (error) { seen.delete(key); throw error; }
-    })();
+    found = savedOrLoad<UserFile[]>(browserListStore(), `user/${key}`, async () => {
+      const { fs, db } = await reader();
+      const filters = [fs.where('status', '==', 'live'), ...(section ? [fs.where('section', '==', section)] : []), ...(cls ? [fs.where('cls', '==', cls)] : []), ...(subject ? [fs.where('subject', '==', subject)] : [])];
+      const files: UserFile[] = []; let cursor: unknown;
+      while (true) {
+        const snap = await fs.getDocs(fs.query(fs.collection(db, 'userFiles'), ...filters, fs.limit(300), ...(cursor ? [fs.startAfter(cursor)] : [])));
+        files.push(...snap.docs.map((d) => parseUserFile(d.id, d.data())).filter((f): f is UserFile => f !== null));
+        if (snap.docs.length < 300) return files;
+        cursor = snap.docs.at(-1);
+      }
+    }, parseSavedUserFiles).catch((error) => { seen.delete(key); throw error; });
     seen.set(key, found);
   }
   return found;
 }
-export const forgetUserFiles = (): void => seen.clear();
+/** Forget the student lists kept in memory and saved on this device, so the next request reads the real ones. */
+export const forgetUserFiles = (): void => { seen.clear(); forgetLists(browserListStore(), 'user/'); forgetLists(browserListStore(), 'userfile/'); };
 export async function getUserFile(id: string): Promise<UserFile | null> {
   if (!cloudEnabled()) return null;
-  try { const { fs, db } = await reader(); const snap = await fs.getDoc(fs.doc(db, 'userFiles', id)); return snap.exists() ? parseUserFile(id, snap.data()) : null; }
-  catch { return null; }
+  try {
+    return await savedOrLoad<UserFile | null>(browserListStore(), `userfile/${id}`, async () => {
+      const { fs, db } = await reader(); const snap = await fs.getDoc(fs.doc(db, 'userFiles', id)); return snap.exists() ? parseUserFile(id, snap.data()) : null;
+    }, (d) => (d && typeof d === 'object' ? parseUserFile(id, d) ?? undefined : undefined), { keep: (f) => f?.status === 'live' });
+  } catch { return null; }
 }
 
 export function buildUserStore({ fs, db }: Opened): UserStore {
@@ -185,5 +193,6 @@ export async function deleteMyAccount(uid: string): Promise<void> {
   }
   await fs.deleteDoc(fs.doc(db, 'users', uid));
   await deleteUser(authUser);
+  forgetUnlocked(browserListStore(), uid);
   forgetAccess(); forgetUserFiles();
 }

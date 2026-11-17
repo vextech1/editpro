@@ -20,9 +20,9 @@
   const out = $derived(outputSize(base.width, base.height, ratio, Math.max(base.width, base.height)));
   const info = $derived(fitRect(base.width, base.height, out.w, out.h, 'fill', zoom / 100, panX, panY));
   const shape = $derived(SHAPES.find((s) => s.ratio === ratioId && s.r === radius)?.id ?? '');
-  const changed = $derived(ratioId !== '1:1' || radius !== 50 || zoom !== 100 || panX !== 0 || panY !== 0);
+  const changed = $derived(ratioId !== '1:1' || radius !== 50 || zoom !== 100 || panX !== 0 || panY !== 0 || fmt !== 'image/png');
   const setShape = (id: string) => { const s = SHAPES.find((x) => x.id === id)!; ratioId = s.ratio; radius = s.r; panX = 0; panY = 0; };
-  const reset = () => { ratioId = '1:1'; radius = 50; zoom = 100; panX = 0; panY = 0; };
+  const reset = () => { ratioId = '1:1'; radius = 50; zoom = 100; panX = 0; panY = 0; fmt = 'image/png'; };
 
   $effect(() => {
     if (!view) return;

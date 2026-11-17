@@ -130,3 +130,9 @@ export function checkLibraryRoom(adminUsed: number, studentBytes: number, studen
   const need = newSize + perFileOverhead;
   return used + need <= limit ? { ok: true } : BAD('the Library is full right now. Please try again later');
 }
+
+/** A student-file list as kept by list-cache. Each file is checked again; anything invalid is left out, and a non-list reads as "nothing saved". */
+export function parseSavedUserFiles(d: unknown): UserFile[] | undefined {
+  if (!Array.isArray(d)) return undefined;
+  return d.map((f) => parseUserFile(String((f as { id?: unknown })?.id ?? ''), f)).filter((f): f is UserFile => f !== null);
+}

@@ -6,7 +6,7 @@
   import { fmtBytes } from '#lib/core/format.ts';
   import { ago } from '#lib/core/handoff.ts';
   import { studioHref, workspaceById } from '#lib/core/workspaces.ts';
-  // Shows how much of the 100 MB unfinished work is using. Near the limit (or with `always`) it lists the work so some can be finished.
+  // Shows how much storage unfinished work is using. When the device is full (or with `always`) it lists the work so some can be finished.
   let { always = false }: { always?: boolean } = $props();
   let list = $state<SessionMeta[]>([]);
   let msg = $state('');
@@ -55,9 +55,9 @@
 {#if workUsage.near || (always && list.length)}
   <section class="storage" class:full={workUsage.full} aria-label="Unfinished work storage">
     <div class="meter" role="img" aria-label="{workUsage.percent}% used"><span style="width:{workUsage.percent}%"></span></div>
-    <p class="sub" style="margin:6px 0 0">Unfinished work uses {fmtBytes(workUsage.used)} of {fmtBytes(workUsage.limit)}.</p>
+    <p class="sub" style="margin:6px 0 0">Unfinished work uses {fmtBytes(workUsage.used)}{Number.isFinite(workUsage.limit) ? ` of ${fmtBytes(workUsage.limit)}` : ' on this device'}.</p>
     {#if workUsage.full}
-      <p class="warn" role="alert"><strong>Storage for unfinished work is full.</strong> Finish a piece of work, then download it or save it to My files and delete it here. Until you do, new changes are not saved automatically.</p>
+      <p class="warn" role="alert"><strong>This device is out of storage.</strong> Finish a piece of work, then download it or save it to My files and delete it here. Until you do, new changes are not saved automatically.</p>
     {:else if workUsage.near}
       <p class="warn" role="status">Almost full. Finish the work you are done with, then download or save it and delete it here, so new changes keep saving automatically.</p>
     {/if}

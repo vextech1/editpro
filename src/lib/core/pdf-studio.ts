@@ -23,6 +23,42 @@ export function rotatePage(pages: PageSpec[], index: number, degrees: number): P
 export function removePage(pages: PageSpec[], index: number): PageSpec[] {
   return pages.length <= 1 || index < 0 || index >= pages.length ? pages : pages.filter((_, i) => i !== index);
 }
+
+/**
+ * Step-by-step history for edits made in the Pages sheet that are not applied yet (the tick is not tapped).
+ * `steps[0]` is the page list as it was when the history began; every turn, move, remove or reset adds one step.
+ * Undo and redo move exactly one step. `from` is the page that was showing before the change, so Undo can take you back to it.
+ */
+export interface PagesStep { pages: PageSpec[]; current: number; from: number }
+export interface PagesHistory { steps: readonly PagesStep[]; pos: number }
+
+const copyPages = (pages: readonly PageSpec[]): PageSpec[] => pages.map((p) => ({ index: p.index, rotate: p.rotate }));
+export const samePages = (a: readonly PageSpec[], b: readonly PageSpec[]): boolean =>
+  a.length === b.length && a.every((p, i) => p.index === b[i].index && p.rotate === b[i].rotate);
+
+export function newPagesHistory(pages: readonly PageSpec[], current = 0): PagesHistory {
+  return { steps: [{ pages: copyPages(pages), current, from: current }], pos: 0 };
+}
+/** Add a step after a change. Anything that could have been redone is dropped. A change that leaves the pages as they were adds nothing. */
+export function recordPages(h: PagesHistory, pages: readonly PageSpec[], from: number, current: number): PagesHistory {
+  if (samePages(h.steps[h.pos].pages, pages)) return h;
+  return { steps: [...h.steps.slice(0, h.pos + 1), { pages: copyPages(pages), current, from }], pos: h.pos + 1 };
+}
+export const canUndoPages = (h: PagesHistory): boolean => h.pos > 0;
+export const canRedoPages = (h: PagesHistory): boolean => h.pos < h.steps.length - 1;
+export interface PagesMove { history: PagesHistory; pages: PageSpec[]; current: number }
+/** One step back, or undefined when there is nothing to undo. */
+export function undoPages(h: PagesHistory): PagesMove | undefined {
+  if (!canUndoPages(h)) return undefined;
+  const pos = h.pos - 1, pages = copyPages(h.steps[pos].pages);
+  return { history: { steps: h.steps, pos }, pages, current: pageIndex(h.steps[h.pos].from, pages.length) };
+}
+/** One step forward, or undefined when there is nothing to redo. */
+export function redoPages(h: PagesHistory): PagesMove | undefined {
+  if (!canRedoPages(h)) return undefined;
+  const pos = h.pos + 1, pages = copyPages(h.steps[pos].pages);
+  return { history: { steps: h.steps, pos }, pages, current: pageIndex(h.steps[pos].current, pages.length) };
+}
 /** Most PDFs one merge can take. */
 export const MERGE_MAX = 20;
 /** Move one item up or down a list (offset -1 or +1). Returns a new list; out-of-range moves leave it as it was. */

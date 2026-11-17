@@ -14,12 +14,13 @@
   import { buildMark, paintMark } from '#lib/core/photo-render.ts';
   import { compressPdfImages, PRESETS, type PresetKey } from '#lib/core/pdf-compress.ts';
   import { jpegRecompressor, toBlob } from '#lib/core/image.ts';
-  import { cropMarginsFor, initialPages, movePage, pageIndex, PDF_TAB_SHEET, removePage, rotatePage, type PdfSheetId } from '#lib/core/pdf-studio.ts';
+  import { canRedoPages, canUndoPages, cropMarginsFor, initialPages, movePage, newPagesHistory, pageIndex, PDF_TAB_SHEET, recordPages, redoPages, removePage, rotatePage, undoPages, type PagesHistory, type PdfSheetId } from '#lib/core/pdf-studio.ts';
   import { ALL_TOOLS_ID, PDF_GROUPS, dockButtons, groupTiles, soleTool, type ToolRow } from '#lib/core/studio-tools.ts';
   import { openInStudio } from '#lib/workspace.svelte.ts';
   import type { StageTransform } from '#lib/core/stage-gesture.ts';
   import Icon from './Icon.svelte';
-  import StudioShell, { type ShellToast } from './StudioShell.svelte';
+  import StudioShell, { type ShellHistory, type ShellToast } from './StudioShell.svelte';
+  import { provideHistory, useHistory } from '#lib/sheet-history.svelte.ts';
   import ToolSheet from './ToolSheet.svelte';
   import CropOverlay from './CropOverlay.svelte';
   import Chips from './Chips.svelte';
@@ -49,6 +50,7 @@
   let pageTotal = $state(0);
   let current = $state(0);
   let pages = $state<PageSpec[]>([]);
+  let pagesHist = $state.raw<PagesHistory>(newPagesHistory([]));   // one step per change made in Pages, applied or not: what Undo and Redo walk while Pages is open
   let sheet = $state<Sheet | null>(null);
   let busy = $state(false);
   let status = $state('');
@@ -116,6 +118,43 @@
     return { w: Math.max(1, Math.floor(pageW * k)), h: Math.max(1, Math.floor(pageH * k)) };
   });
   const currentName = () => st.file?.name ?? 'document.pdf';
+  const stampChanged = $derived(JSON.stringify(stamp) !== JSON.stringify(defaultStamp()));
+  const metaChanged = $derived(JSON.stringify(meta) !== JSON.stringify(originalMeta));
+  // Undo and Redo step through edits that are not applied yet, one step per press, even before the tick is tapped.
+  // Pages keeps its own steps (below). Merge, Split, Add images and Scan register theirs from inside their sheets.
+  // Crop, Page numbers, Watermark, Info and Compress are held here. The convert and extract tools (To images, Pictures, To Word, To text, Read text) have none.
+  const registry = provideHistory();
+  const EDIT_SHEETS: (Sheet | null)[] = ['crop', 'stamp', 'watermark', 'info', 'compress'];
+  interface EditSnap { sheet: Sheet | null; v?: unknown }
+  const logoOf = (s: EditSnap) => (s.sheet === 'watermark' ? (s.v as { logo: HTMLCanvasElement | null }).logo : null);
+  const editorHist = useHistory<EditSnap>({
+    registry,
+    enabled: () => EDIT_SHEETS.includes(sheet),
+    key: () => sheet,
+    capture: () => {
+      switch (sheet) {
+        case 'crop': return { sheet, v: { shape: cropShape, scope: cropScope, box: { ...cropBox } } };
+        case 'stamp': return { sheet, v: $state.snapshot(stamp) };
+        case 'watermark': return { sheet, v: { wm: $state.snapshot(wm), logo: wmLogo } };
+        case 'info': return { sheet, v: $state.snapshot(meta) };
+        case 'compress': return { sheet, v: preset };
+        default: return { sheet };
+      }
+    },
+    same: (a, b) => a.sheet === b.sheet && JSON.stringify(a.v) === JSON.stringify(b.v) && logoOf(a) === logoOf(b),
+    restore: (s) => {
+      if (s.sheet !== sheet) return;
+      if (s.sheet === 'crop') { const v = s.v as { shape: string; scope: 'all' | 'page'; box: Rect }; cropShape = v.shape; cropScope = v.scope; cropBox = { ...v.box }; cropNote = ''; }
+      else if (s.sheet === 'stamp') stamp = structuredClone(s.v as StampOptions);
+      else if (s.sheet === 'watermark') { const v = s.v as { wm: WatermarkDraft; logo: HTMLCanvasElement | null }; wm = structuredClone(v.wm); wmLogo = v.logo; }
+      else if (s.sheet === 'info') meta = structuredClone(s.v as PdfMeta);
+      else if (s.sheet === 'compress') preset = s.v as PresetKey;
+    }
+  });
+  const pagesHistory = $derived<ShellHistory | null>(sheet === 'pages'
+    ? { canUndo: canUndoPages(pagesHist), canRedo: canRedoPages(pagesHist), undo: pagesUndo, redo: pagesRedo }
+    : null);
+  const shellHistory = $derived<ShellHistory | null>(pagesHistory ?? registry.active);
 
   function paintRotated(input: HTMLCanvasElement, rotation: number) {
     if (!canvas) return;
@@ -139,7 +178,7 @@
       const image = await renderPage(doc, spec.index + 1, { maxSide: 1500 });
       if (my === token) {
         paintRotated(image, spec.rotate);
-        if (detectPending) { detectPending = false; if (sheet === 'crop') detectEdges(); }
+        if (detectPending) { detectPending = false; if (sheet === 'crop') { detectEdges(); editorHist.reset(); } }
       }
       image.width = image.height = 0;
     } catch (e) {
@@ -155,7 +194,7 @@
       const total = doc.numPages;
       closePdf(doc);
       if (my !== token) return;
-      source = bytes; pageTotal = total; pages = initialPages(total); current = 0;
+      source = bytes; pageTotal = total; pages = initialPages(total); current = 0; pagesHist = newPagesHistory(pages, 0);
       zoom = { scale: 1, x: 0, y: 0 };
       sheet = null; bad = false; status = '';
       const waiting = takePending((f) => f.type === 'application/pdf').files;   // several PDFs picked at once mean a merge
@@ -223,9 +262,9 @@
   async function openCrop() {
     if (!source) return;
     const redraw = pages.length !== pageTotal || pages.some((p, i) => p.index !== i || p.rotate !== 0);
-    if (redraw) { current = pageIndex(pages[current]?.index ?? 0, pageTotal); pages = initialPages(pageTotal); }
+    if (redraw) { current = pageIndex(pages[current]?.index ?? 0, pageTotal); pages = initialPages(pageTotal); pagesHist = newPagesHistory(pages, current); }
     cropShape = 'free'; cropScope = 'all'; cropBox = { x: 0, y: 0, w: 1, h: 1 }; cropNote = '';
-    if (redraw) detectPending = true; else detectEdges();
+    if (redraw) detectPending = true; else { detectEdges(); editorHist.reset(); }   // the edges found on opening are where Crop starts, not a step
     try { sizes = await pageSizes(source); } catch (e) { bad = true; status = pdfErrorMessage(e, currentName()); sheet = null; }
   }
   $effect(() => {
@@ -242,16 +281,22 @@
   function applyCrop() { if (cropWhole) { sheet = null; return; } void apply(); }
   function reset() {
     if (!sheet) return;
-    if (sheet === 'pages') { pages = initialPages(pageTotal); current = 0; }
-    if (sheet === 'crop') { cropShape = 'free'; cropBox = { x: 0, y: 0, w: 1, h: 1 }; cropNote = ''; }
+    // Reset drops every edit not applied yet and is not an undo step: the unapplied history goes with them. Saved versions are only ever moved by Undo and Redo.
+    if (sheet === 'pages') { pages = initialPages(pageTotal); current = 0; pagesHist = newPagesHistory(pages, 0); }
+    if (sheet === 'crop') { cropShape = 'free'; cropScope = 'all'; cropBox = { x: 0, y: 0, w: 1, h: 1 }; cropNote = ''; }
     if (sheet === 'stamp') stamp = defaultStamp();
     if (sheet === 'info') meta = { ...originalMeta };
     if (sheet === 'compress') preset = 'balanced';
+    editorHist.reset();   // no-op for sheets that are not held here
   }
   async function loadInfo() {
     if (!source) return;
-    try { const found = await readMeta(source); meta = { title: found.title, author: found.author, subject: found.subject, keywords: found.keywords, creator: found.creator, producer: found.producer }; originalMeta = { ...meta }; }
-    catch (e) { bad = true; status = pdfErrorMessage(e, currentName()); }
+    try {
+      const found = await readMeta(source);
+      meta = { title: found.title, author: found.author, subject: found.subject, keywords: found.keywords, creator: found.creator, producer: found.producer };
+      originalMeta = { ...meta };
+      editorHist.reset();   // what the file already says is where Info starts, not a step
+    } catch (e) { bad = true; status = pdfErrorMessage(e, currentName()); }
   }
   function changePage(n: number) { cropNote = ''; current = pageIndex(n, pages.length); zoom = { scale: 1, x: 0, y: 0 }; status = ''; }
 
@@ -311,13 +356,17 @@
     const added = await st.commit(pdfBlob(bytes), label, `${baseName(currentName())}-${suffix}.pdf`);
     sheet = null; status = added ? '' : 'No changes to save.';
   }
+  /** Every change in Pages is one history step; `from` is the page that was showing before it. */
+  function changePages(next: PageSpec[], from: number) { pages = next; pagesHist = recordPages(pagesHist, next, from, current); }
   function move(index: number, offset: number) {
     const next = movePage(pages, index, offset);
     if (next[index]?.index !== pages[index]?.index) current = pageIndex(index + offset, next.length);
-    pages = next;
+    changePages(next, index);
   }
-  function rotate(index: number, angle: number) { pages = rotatePage(pages, index, angle); }
-  function remove(index: number) { pages = removePage(pages, index); current = pageIndex(current, pages.length); }
+  function rotate(index: number, angle: number) { changePages(rotatePage(pages, index, angle), index); }
+  function remove(index: number) { const next = removePage(pages, index); current = pageIndex(current, next.length); changePages(next, index); }
+  function pagesUndo() { const r = undoPages(pagesHist); if (r) { pagesHist = r.history; pages = r.pages; current = r.current; } }
+  function pagesRedo() { const r = redoPages(pagesHist); if (r) { pagesHist = r.history; pages = r.pages; current = r.current; } }
 </script>
 
 {#snippet stageContent()}
@@ -371,13 +420,13 @@
   {:else if sheet === 'extract' && source}
     <PdfExtractSheet {source} name={currentName()} oncancel={() => (sheet = null)} />
   {:else if sheet === 'crop'}
-    <ToolSheet title="Crop" onreset={reset} canReset={cropShape !== 'free' || !cropWhole} onapply={applyCrop} oncancel={() => (sheet = null)} {busy}>
+    <ToolSheet title="Crop" onreset={reset} canReset={cropShape !== 'free' || cropScope !== 'all' || !cropWhole} onapply={applyCrop} oncancel={() => (sheet = null)} {busy}>
       <Chips label="Shape" items={ASPECTS} value={cropShape} onpick={pickShape} action={{ label: 'Detect edges', onclick: detectEdges }} />
       {#if pageTotal > 1}<Chips label="Apply to" items={[{ id: 'all', label: 'All pages' }, { id: 'page', label: `This page (${current + 1})` }]} value={cropScope} onpick={(id) => (cropScope = id)} />{/if}
       <p class="muted hint">{cropMm ? `${cropMm.w} × ${cropMm.h} mm. ` : ''}{cropNote || 'Drag the handles on the page.'}</p>
     </ToolSheet>
   {:else if sheet === 'stamp'}
-    <ToolSheet title="Page numbers" onreset={reset} onapply={apply} oncancel={() => (sheet = null)} {busy}>
+    <ToolSheet title="Page numbers" onreset={reset} canReset={stampChanged} onapply={apply} oncancel={() => (sheet = null)} {busy}>
       <div class="controls">
         <label>Footer text<input type="text" bind:value={stamp.footer.center} placeholder="Page number of total" /></label>
         <label>Header text<input type="text" bind:value={stamp.header.center} placeholder="Optional" /></label>
@@ -389,9 +438,9 @@
       <p class="muted">Use {'{n}'}, {'{total}'}, {'{file}'}, {'{date}'} or {'{bates}'}.</p>
     </ToolSheet>
   {:else if sheet === 'watermark'}
-    <PdfWatermarkSheet bind:draft={wm} bind:logo={wmLogo} {busy} onapply={apply} oncancel={() => (sheet = null)} />
+    <PdfWatermarkSheet bind:draft={wm} bind:logo={wmLogo} {busy} onreset={() => editorHist.reset()} onapply={apply} oncancel={() => (sheet = null)} />
   {:else if sheet === 'info'}
-    <ToolSheet title="Info" onreset={reset} onapply={apply} oncancel={() => (sheet = null)} {busy}>
+    <ToolSheet title="Info" onreset={reset} canReset={metaChanged} onapply={apply} oncancel={() => (sheet = null)} {busy}>
       <p class="muted">{currentName()} · {pageTotal} {pageTotal === 1 ? 'page' : 'pages'} · {fmtBytes(st.file?.size ?? 0)}</p>
       <div class="controls">
         <label>Title<input type="text" bind:value={meta.title} /></label>
@@ -403,7 +452,7 @@
       </div>
     </ToolSheet>
   {:else if sheet === 'compress'}
-    <ToolSheet title="Compress" onreset={reset} onapply={apply} oncancel={() => (sheet = null)} {busy}>
+    <ToolSheet title="Compress" onreset={reset} canReset={preset !== 'balanced'} onapply={apply} oncancel={() => (sheet = null)} {busy}>
       <label>Image quality<select bind:value={preset}>{#each Object.entries(PRESETS) as [key, value]}<option value={key}>{value.label}</option>{/each}</select></label>
       <p class="muted">Text and vector artwork stay sharp. Embedded JPEG images are recompressed only when the result is smaller.</p>
     </ToolSheet>
@@ -414,7 +463,7 @@
   {#if allTools}<AllToolsPanel studio="document" kind="pdf" onpick={pickRow} onback={() => (allTools = false)} />{/if}
 {/snippet}
 
-<StudioShell label="Document Studio PDF editor" closeLabel="Close this PDF" {onclose} downloadUrl={downloadUrl} locked={!!sheet || !!group} {busy}
+<StudioShell label="Document Studio PDF editor" closeLabel="Close this PDF" {onclose} downloadUrl={downloadUrl} locked={!!sheet || !!group} history={shellHistory} {busy}
   {saved} {saveLabel} {oncopy} {onremove} bind:menu bind:versions closeVersionsOnPick
   stageLabel="PDF page preview. Pinch to zoom and drag to pan." zoomLabel="PDF page zoom" content={{ w: pageDisplay.w || stageW, h: pageDisplay.h || stageH }} bind:stageW bind:stageH bind:zoom
   blockGestures={!paging || !!group || allTools || versions || menu} onswipe={(step) => changePage(current + step)} {toasts} dock={pageTotal ? DOCK : []} dockLabel="PDF tools" ondock={dockPick} {hasSheet} onescape={() => { if (allTools) allTools = false; else if (group) group = null; else sheet = null; }}

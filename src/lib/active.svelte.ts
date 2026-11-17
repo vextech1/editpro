@@ -41,8 +41,10 @@ export const activeWork = new ActiveStore();
 class WorkUsage {
   used = $state(0);
   limit = $state(WORK_LIMIT_BYTES);
-  get full() { return this.used >= this.limit; }
-  get near() { return this.used >= this.limit * WORK_NEAR; }
+  /** Set when the browser itself refused to store more (the device is out of storage), whatever our own limit says. */
+  blocked = $state(false);
+  get full() { return this.blocked || this.used >= this.limit; }
+  get near() { return this.blocked || this.used >= this.limit * WORK_NEAR; }
   get percent() { return Math.min(100, Math.round((this.used / this.limit) * 100)); }
   async refresh() { try { const u = await getSessions().usage(); this.used = u.used; this.limit = u.limit; } catch { /* storage unavailable */ } }
 }

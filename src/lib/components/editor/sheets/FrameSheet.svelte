@@ -28,6 +28,8 @@
   const sec = $derived(tabs.some((t) => t.id === section) ? section : tabs[0].id);
   const transparent = $derived(frameIsTransparent(choice));
   function setKind(k: 'wall' | 'phone') { kind = k; section = k === 'wall' ? 'style' : 'phone'; }
+  const changed = $derived(kind !== 'wall' || wStyle !== 'black' || wSize !== 'photo' || wFrame !== 5 || wMat !== 8 || wMatColor !== '#ffffff' || wWall !== 'light' || !wShadow || wFit !== 'fill'
+    || pStyle !== 'island' || pColor !== 'black' || pBg !== 'gradient' || pC1 !== '#5fe0d6' || pC2 !== '#8f86ff' || !pShadow || pFit !== 'fill');
   function reset() {
     kind = 'wall'; section = 'style'; wStyle = 'black'; wSize = 'photo'; wFrame = 5; wMat = 8; wMatColor = '#ffffff'; wWall = 'light'; wShadow = true; wFit = 'fill';
     pStyle = 'island'; pColor = 'black'; pBg = 'gradient'; pC1 = '#5fe0d6'; pC2 = '#8f86ff'; pShadow = true; pFit = 'fill';
@@ -48,7 +50,7 @@
   }
 </script>
 
-<ToolSheet title="Frames" canReset onreset={reset} onapply={apply} {oncancel} {busy}>
+<ToolSheet title="Frames" canReset={changed} onreset={reset} onapply={apply} {oncancel} {busy}>
   <Chips items={KINDS} value={kind} onpick={setKind} label="Frame type" />
   {#if kind === 'wall'}
     {#if sec === 'style'}

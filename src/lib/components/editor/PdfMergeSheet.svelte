@@ -9,6 +9,7 @@
   import { readBytes, pdfErrorMessage } from '#lib/core/files.ts';
   import { MERGE_MAX } from '#lib/core/pdf-studio.ts';
   import { fmtBytes } from '#lib/core/format.ts';
+  import { useHistory } from '#lib/sheet-history.svelte.ts';
 
   // Join this PDF with others, in the order shown. The tick saves the joined PDF as the next version.
   interface Item { id: number; name: string; bytes: Uint8Array; pages: number; mine?: boolean }
@@ -19,6 +20,12 @@
   let items = $state<Item[]>([{ id: seq++, ...first, mine: true }]);
   let busy = $state(false); let status = $state(''); let bad = $state(false);
   const total = $derived(items.reduce((t, i) => t + i.pages, 0));
+  // Undo and Redo for the list while it is not merged yet: add, remove and reorder are steps.
+  const hist = useHistory<Item[]>({
+    capture: () => items.map((i) => ({ ...i })),
+    restore: (v) => { items = v.map((i) => ({ ...i })); status = ''; bad = false; },
+    same: (a, b) => a.length === b.length && a.every((x, i) => x.id === b[i].id)
+  });
 
   async function add(files: File[]) {
     busy = true; bad = false; status = '';
@@ -29,8 +36,8 @@
     }
     busy = false;
   }
-  onMount(() => { const waiting = untrack(() => extras); if (waiting.length) void add(waiting); });   // files picked together on the Home page
-  function reset() { items = items.filter((i) => i.mine); status = ''; bad = false; }
+  onMount(() => { const waiting = untrack(() => extras); if (waiting.length) void add(waiting).then(() => hist.reset()); });   // files that arrived with the sheet are where it starts, not a step   // files picked together on the Home page
+  function reset() { items = items.filter((i) => i.mine); status = ''; bad = false; hist.reset(); }
   async function apply() {
     if (items.length < 2 || busy) return;
     busy = true; bad = false; status = 'Merging…';

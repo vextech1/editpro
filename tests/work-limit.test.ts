@@ -10,8 +10,15 @@ const pdf = (s: string, name = 'r.pdf') => new File([s], name, { type: 'applicat
 const blob = (s: string) => new Blob([s], { type: 'application/pdf' });
 const setLimit = (n: number) => Object.assign(getSessions(), { limit: n });
 
-describe('the 100 MB limit', () => {
-  it('is 100 MB', () => { expect(WORK_LIMIT_BYTES).toBe(100 * 1024 * 1024); });
+describe('the work limit', () => {
+  it('has no limit of its own (only the browser and device limit it)', () => { expect(WORK_LIMIT_BYTES).toBe(Infinity); });
+
+  it('turns a browser "storage full" error into WorkLimitError', async () => {
+    const store = new MemorySessionStore();
+    const quota = Object.assign(new Error('full'), { name: 'QuotaExceededError' });
+    store.putBlob = async () => { throw quota; };
+    await expect(new Sessions(store).start('pdf', pdf('AAAA'), 'a.pdf')).rejects.toBeInstanceOf(WorkLimitError);
+  });
 
   it('counts every piece of unfinished work together and reports almost full and full', async () => {
     const s = new Sessions(new MemorySessionStore(), undefined, undefined, undefined, 10);

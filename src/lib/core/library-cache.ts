@@ -15,3 +15,14 @@ export function decodeLibraryCache(raw: string | null | undefined): LibraryData 
     return { files: parseCloudIndex({ files: j.files }), structure: parseLibraryStructure({ sections: j.sections }) };
   } catch { return undefined; }
 }
+
+export interface Catalog extends LibraryData { partial: boolean }
+/** The catalog as kept by list-cache (files as a list, structure as the section array). Anything invalid reads as "nothing saved". */
+export function parseSavedCatalog(d: unknown): Catalog | undefined {
+  const j = d as { files?: unknown; structure?: unknown } | null;
+  if (!j || !Array.isArray(j.files)) return undefined;
+  try {
+    const files = parseCloudIndex({ files: Object.fromEntries((j.files as CloudFile[]).map(({ id, ...entry }) => [id, entry])) });
+    return { files, structure: parseLibraryStructure({ sections: j.structure }), partial: false };
+  } catch { return undefined; }
+}

@@ -8,6 +8,7 @@
   import { picturesToJpegs } from '#lib/core/pdf-pictures.ts';
   import { pdfErrorMessage } from '#lib/core/files.ts';
   import { fmtBytes } from '#lib/core/format.ts';
+  import { useHistory } from '#lib/sheet-history.svelte.ts';
 
   // Put pictures on new pages after the last page of this PDF. The tick saves the result as the next version.
   interface Item { id: number; file: File; thumb: string }
@@ -20,12 +21,20 @@
   let margin = $state(24);
   let busy = $state(false); let status = $state(''); let bad = $state(false);
 
-  const free = (list: Item[]) => list.forEach((i) => URL.revokeObjectURL(i.thumb));
-  onDestroy(() => free(items));
-  function add(files: File[]) { bad = false; status = ''; items.push(...files.map((file) => ({ id: seq++, file, thumb: URL.createObjectURL(file) }))); }
-  onMount(() => { if (extras.length) add(extras); });
-  function remove(id: number) { const gone = items.find((i) => i.id === id); if (gone) free([gone]); items = items.filter((i) => i.id !== id); }
-  function reset() { free(items); items = []; size = 'a4'; margin = 24; status = ''; bad = false; }
+  // Thumbnails stay valid until the sheet closes or Reset, so Undo can bring a removed picture back with its thumbnail.
+  const made: string[] = [];
+  const release = () => { made.forEach((u) => URL.revokeObjectURL(u)); made.length = 0; };
+  onDestroy(release);
+  type Snap = { items: Item[]; size: PageSize; margin: number };
+  const hist = useHistory<Snap>({
+    capture: () => ({ items: items.map((i) => ({ ...i })), size, margin }),
+    restore: (v) => { items = v.items.map((i) => ({ ...i })); size = v.size; margin = v.margin; status = ''; bad = false; },
+    same: (a, b) => a.size === b.size && a.margin === b.margin && a.items.length === b.items.length && a.items.every((x, i) => x.id === b.items[i].id)
+  });
+  function add(files: File[]) { bad = false; status = ''; items.push(...files.map((file) => { const thumb = URL.createObjectURL(file); made.push(thumb); return { id: seq++, file, thumb }; })); }
+  onMount(() => { if (extras.length) { add(extras); hist.reset(); } });   // pictures that arrived with the sheet are where it starts, not a step
+  function remove(id: number) { items = items.filter((i) => i.id !== id); }
+  function reset() { release(); items = []; size = 'a4'; margin = 24; status = ''; bad = false; hist.reset(); }
   async function apply() {
     if (!items.length || busy) return;
     busy = true; bad = false; status = '';

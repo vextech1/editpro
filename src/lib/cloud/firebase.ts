@@ -8,6 +8,8 @@
 import { SITE } from '#lib/site.ts';
 import { ADMINS_COLLECTION, normalizeEmail, sortedAdmins } from '#lib/core/admins.ts';
 import { deleteAllParts, downloadCloud, mimeOf, parseTrash, partId, readIndex, shardDocName, type CloudEntry, type CloudFile, type CloudStore, type ReadIndex, type TrashItem } from '#lib/core/cloud-library.ts';
+import { browserListStore, forgetLists, savedOrLoad } from '#lib/core/list-cache.ts';
+import { parseSavedCatalog, type Catalog } from '#lib/core/library-cache.ts';
 import { FILE_CACHE_MAX_BYTES, FILE_CACHE_NAME, cachedDownload, planEviction, type FileCache } from '#lib/core/file-cache.ts';
 import { parseLibraryStructure, type LibraryStructure } from '#lib/core/library-structure.ts';
 import { userPartId } from '#lib/core/user-library.ts';
@@ -107,41 +109,44 @@ async function pruneDeviceCopies(validIds: Set<string>): Promise<void> {
 }
 const loading = new Map<string, Promise<Uint8Array>>();
 let listing: Promise<CloudFile[]> | undefined;
-/** Every uploaded file. One document read, then kept for the rest of the visit. Never throws: any problem means "no uploaded files". */
+/** Every uploaded file. Taken from the copy saved on this device while it is recent (no Firebase read), otherwise one read per index part. Never throws: any problem means "no uploaded files". */
 export function listCloudFiles(): Promise<CloudFile[]> {
   if (!cloudEnabled()) return Promise.resolve([]);
   return (listing ??= (async () => {
     try {
-      const { fs, db } = await reader();
-      const { files, failed } = await readIndex(async (name) => (await fs.getDoc(fs.doc(db, 'library', name))).data());
-      if (failed) listing = undefined;     // some parts could not be read: show what there is now, and try again on the next request
+      const { files, partial } = await loadLibraryData();
+      if (partial) listing = undefined;     // some parts could not be read: show what there is now, and try again on the next request
       else if (files.length) void pruneDeviceCopies(new Set(files.map((f) => f.id))).catch(() => {});
       return files;
     }
     catch { listing = undefined; return []; }       // try again next time instead of remembering a failure
   })());
 }
-export const forgetCloudList = (): void => { listing = undefined; };
+/** Forget the list kept in memory and the copy saved on this device, so the next request reads the real one. */
+export const forgetCloudList = (): void => { listing = undefined; forgetLists(browserListStore(), 'catalog'); };
 
 /**
  * Everything the Library page shows, in one go. Unlike listCloudFiles, a failure is thrown, so the page can tell
  * "could not load" apart from "the Library really is empty". `partial` means some index parts could not be read.
+ * A copy saved on this device less than LIST_TTL_MS ago is used without asking Firebase; `force` always asks. If asking fails,
+ * the saved copy (any age) is returned with `fromSaved` set.
  */
-export async function loadLibraryData(): Promise<{ files: CloudFile[]; structure: LibraryStructure; partial: boolean }> {
-  const { fs, db } = await reader();
-  const [{ files, failed }, structure] = await Promise.all([
-    readIndex(async (name) => (await fs.getDoc(fs.doc(db, 'library', name))).data()),
-    fs.getDoc(fs.doc(db, ...STRUCTURE))
-  ]);
-  return { files, structure: parseLibraryStructure(structure.data()), partial: failed > 0 };
+export async function loadLibraryData(force = false): Promise<Catalog & { fromSaved: boolean }> {
+  let fromSaved = false;
+  const data = await savedOrLoad<Catalog>(browserListStore(), 'catalog', async () => {
+    const { fs, db } = await reader();
+    const [{ files, failed }, structure] = await Promise.all([
+      readIndex(async (name) => (await fs.getDoc(fs.doc(db, 'library', name))).data()),
+      fs.getDoc(fs.doc(db, ...STRUCTURE))
+    ]);
+    return { files, structure: parseLibraryStructure(structure.data()), partial: failed > 0 };
+  }, parseSavedCatalog, { force, keep: (d) => !d.partial, onFallback: () => { fromSaved = true; } });
+  return { ...data, fromSaved };
 }
 
 export async function getLibraryStructure(): Promise<LibraryStructure> {
   if (!cloudEnabled()) return [];
-  try {
-    const { fs, db } = await reader();
-    return parseLibraryStructure((await fs.getDoc(fs.doc(db, ...STRUCTURE))).data());
-  } catch { return []; }
+  try { return (await loadLibraryData()).structure; } catch { return []; }
 }
 
 /** Reads the file's pieces and returns them with their original content type. */

@@ -13,6 +13,7 @@
   import { draw, loadBitmap, toBlob } from '#lib/core/image.ts';
   import { appendImages, type PageSize } from '#lib/core/pdf.ts';
   import { defaultQuad, detectQuad, outputSize, rotateQuad, scaleQuad, warp, type Quad } from '#lib/core/scan.ts';
+  import { useHistory } from '#lib/sheet-history.svelte.ts';
 
   // Scan pages with the camera (or from photos) and add them after the last page of this PDF. The tick saves the result as the next version.
   // The camera and the page-corner step take the whole screen; the page list lives in the sheet.
@@ -31,7 +32,18 @@
   let status = $state(''); let bad = $state(false); let busy = $state(false);
   let nextId = 1;
 
-  onDestroy(() => { list.forEach((p) => URL.revokeObjectURL(p.thumb)); if (draft) draft.src.width = 0; });
+  // Thumbnails stay valid until the sheet closes or Reset, so Undo can bring back a removed or re-edited page with its thumbnail.
+  const made: string[] = [];
+  const release = () => { made.forEach((u) => URL.revokeObjectURL(u)); made.length = 0; };
+  onDestroy(() => { release(); if (draft) draft.src.width = 0; });
+  type Snap = { list: Pg[]; size: PageSize; margin: number; look: Look };
+  // Undo and Redo for the page list and settings. Off while the camera or the corner step is open.
+  const hist = useHistory<Snap>({
+    enabled: () => view === 'list' && !draft,
+    capture: () => ({ list: list.map((p) => ({ ...p })), size, margin, look: defaultLook }),
+    restore: (v) => { list = v.list.map((p) => ({ ...p })); size = v.size; margin = v.margin; defaultLook = v.look; status = ''; bad = false; },
+    same: (a, b) => a.size === b.size && a.margin === b.margin && a.look === b.look && a.list.length === b.list.length && a.list.every((p, i) => p.id === b.list[i].id && p.out === b.list[i].out)
+  });
 
   /** Look for the page on a small copy, then scale the corners back up to the full photo. */
   function detect(src: HTMLCanvasElement): Quad | null {
@@ -70,8 +82,9 @@
       out.width = th.width = 0;
       if (!outBlob || !srcBlob || !thBlob) throw new Error('encode failed');
       const pg: Pg = { id: draft.editId ?? nextId++, src: srcBlob, quad, look, out: outBlob, w: dims.w, h: dims.h, thumb: URL.createObjectURL(thBlob) };
+      made.push(pg.thumb);
       const i = list.findIndex((p) => p.id === pg.id);
-      if (i >= 0) { URL.revokeObjectURL(list[i].thumb); list[i] = pg; } else list.push(pg);
+      if (i >= 0) list[i] = pg; else list.push(pg);
       defaultLook = look; draft.src.width = 0; draft = null;
       queue = queue.slice(1); status = ''; bad = false;
       if (queue.length) await nextFromQueue(); else view = 'list';
@@ -86,8 +99,8 @@
     const q = rotateQuad(draft.quad, s.width, s.height, dir); s.width = 0; draft.src = c; draft.quad = q;
   }
   function redetect() { if (!draft) return; const q = detect(draft.src); draft.quad = q ?? defaultQuad(draft.src.width, draft.src.height); status = q ? 'Page found.' : 'Couldn’t find the page edges. Drag the corners onto the page.'; }
-  const remove = (i: number) => { URL.revokeObjectURL(list[i].thumb); list.splice(i, 1); };
-  function reset() { list.forEach((p) => URL.revokeObjectURL(p.thumb)); list = []; size = 'a4'; margin = 0; status = ''; bad = false; }
+  const remove = (i: number) => { list.splice(i, 1); };
+  function reset() { release(); list = []; size = 'a4'; margin = 0; defaultLook = 'document'; status = ''; bad = false; hist.reset(); }
 
   async function apply() {
     if (!list.length || busy) return;
@@ -121,7 +134,7 @@
     {/snippet}
   </FullScreen>
 {:else}
-  <ToolSheet title="Scan" onreset={reset} onapply={apply} {oncancel} busy={busy || !list.length} canReset={list.length > 0 || size !== 'a4' || margin !== 0}>
+  <ToolSheet title="Scan" onreset={reset} onapply={apply} {oncancel} busy={busy || !list.length} canReset={list.length > 0 || size !== 'a4' || margin !== 0 || defaultLook !== 'document'}>
     <p class="muted" style="margin-top:0">{list.length ? `${list.length} ${list.length === 1 ? 'page goes' : 'pages go'} after page ${pages}, in this order. Tap the tick to add them.` : `Scan pages to add after page ${pages}.`}</p>
     <div class="bar" style="margin-top:0"><button class="btn" type="button" onclick={() => { status = ''; view = 'camera'; }}>Scan with camera</button></div>
     <div class="sadd"><FileDrop compact accept="image/*" label="Add photos of pages" hint="Pick several to scan them one after another." fromSession={false} onfiles={addFiles} /></div>

@@ -29,8 +29,8 @@ export interface SessionStore {
 /** The Original plus the latest versions; older ones are pruned. */
 export const MAX_VERSIONS = 10;
 export const DEFAULT_RETENTION_DAYS = 7;
-/** All unfinished work together may use at most this much of the browser's storage. */
-export const WORK_LIMIT_BYTES = 100 * 1024 * 1024;
+/** No limit of our own: unfinished work may use as much as the browser and device allow. A full device is reported as WorkLimitError. */
+export const WORK_LIMIT_BYTES = Infinity;
 /** Usage at or above this share of the limit counts as "almost full". */
 export const WORK_NEAR = 0.8;
 const DAY = 86_400_000;
@@ -40,7 +40,7 @@ export class KindMismatchError extends Error {
 }
 
 export class WorkLimitError extends Error {
-  constructor() { super('Unfinished work is using all of its storage.'); this.name = 'WorkLimitError'; }
+  constructor() { super('This device has no storage left for unfinished work.'); this.name = 'WorkLimitError'; }
 }
 
 const defaultId = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
@@ -72,8 +72,8 @@ export class Sessions {
     await this.assertRoom(blob.size);
     const t = this.now(), v: Version = { id: this.newId(), label: 'Original', name: name.trim() || 'file', type: blob.type, size: blob.size, at: t };
     const meta: SessionMeta = { id: this.newId(), workspace, kind, name: v.name, versions: [v], head: 0, created: t, updated: t };
-    await this.store.putBlob(key(meta, v), await blob.arrayBuffer());
-    await this.store.putMeta(meta);
+    try { await this.store.putBlob(key(meta, v), await blob.arrayBuffer()); await this.store.putMeta(meta); }
+    catch (e) { if (isQuota(e)) throw new WorkLimitError(); throw e; }
     return meta;
   }
   async get(id: string): Promise<SessionMeta | undefined> { return (await this.store.metas()).find((m) => m.id === id); }
@@ -102,7 +102,8 @@ export class Sessions {
     catch (e) {
       if (!isQuota(e)) throw e;
       await this.compactMeta(m);   // free space by keeping only the Original and the current version, then try once more
-      await this.store.putBlob(key(m, v), data);
+      try { await this.store.putBlob(key(m, v), data); }
+      catch (e2) { if (isQuota(e2)) throw new WorkLimitError(); throw e2; }
     }
     // A new result after an undo replaces whatever could have been redone.
     const dropped = m.versions.splice(m.head + 1);

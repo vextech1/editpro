@@ -10,8 +10,8 @@ import { fileKind, studioHref, tabInput, workspaceById, workspaceFor, type FileK
 import { STUDIO_CROSSINGS, isCrossingTarget } from '#lib/core/crossings.ts';
 
 const KEY = Symbol('studio');
-export const FULL_NOTE = 'Unfinished work is using all 100 MB, so changes are not saved automatically. Download your work, or finish and delete older work to make room.';
-export const FULL_OPEN_NOTE = 'Unfinished work is using all 100 MB, so this file is not saved automatically and undo is off. Download your results, or finish and delete older work first.';
+export const FULL_NOTE = 'This device is out of storage, so changes are not saved automatically. Download your work, or finish and delete older work to make room.';
+export const FULL_OPEN_NOTE = 'This device is out of storage, so this file is not saved automatically and undo is off. Download your results, or finish and delete older work first.';
 
 export const LOST_NOTE = 'Part of this work could not be found on this device, so it was restored to the nearest saved version.';
 export const VERSION_GONE_NOTE = 'That version is no longer saved, so it was removed from the list.';
@@ -74,12 +74,12 @@ export class StudioState {
     this.note = ''; this.memoryOnly = false; this.unsaved = false; activeWork.dropUnsaved();
     try {
       const m = await getSessions().start(this.workspace, file, file.name); void keepStorage();
-      await this.reload(m.id); void workUsage.refresh();
+      await this.reload(m.id); workUsage.blocked = false; void workUsage.refresh();
     } catch (e) {
       this.memoryOnly = true; this.mem++; this.apply(undefined, file);
       this.note = e instanceof WorkLimitError ? FULL_OPEN_NOTE
         : 'This browser cannot keep your work between steps, so undo is off and nothing is saved if you leave.';
-      if (e instanceof WorkLimitError) void workUsage.refresh();
+      if (e instanceof WorkLimitError) { workUsage.blocked = true; void workUsage.refresh(); }
     }
   }
   /** Make a result the new working version. Returns false when it was identical to the current one. */
@@ -90,14 +90,14 @@ export class StudioState {
       const r = await getSessions().commit(this.session.id, blob, label, name);
       if (!r) return false;
       if (!r.added && this.unsaved) { await this.revert(); return false; }   // the same as the saved version: nothing left unsaved
-      if (r.added) { this.unsaved = false; activeWork.dropUnsaved(); if (this.note === FULL_NOTE) this.note = ''; await this.reload(this.session.id); void workUsage.refresh(); }
+      if (r.added) { this.unsaved = false; activeWork.dropUnsaved(); if (this.note === FULL_NOTE) this.note = ''; await this.reload(this.session.id); workUsage.blocked = false; void workUsage.refresh(); }
       return r.added;
     } catch (e) {
       if (!(e instanceof WorkLimitError)) throw e;
       // Full: carry on with the change in memory, so the person can still use and download it.
       const f = new File([blob], fname, { type: blob.type });
       this.mem++; this.unsaved = true; this.file = f; this.note = FULL_NOTE;
-      activeWork.holdUnsaved(this.session.id, f); void workUsage.refresh();
+      activeWork.holdUnsaved(this.session.id, f); workUsage.blocked = true; void workUsage.refresh();
       return true;
     }
   }
