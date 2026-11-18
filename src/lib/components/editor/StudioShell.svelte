@@ -163,16 +163,19 @@
     </div>
     {@render afterStage?.()}
 
-    {@render sheet?.()}
-    {#if versions && st.session && !hasSheet}
-      <ToolSheet title="Versions" oncancel={() => (versions = false)}>
-        <ol class="vlist">
-          {#each st.session.versions as v, i (v.id)}
-            <li><button type="button" aria-current={i === st.session.head ? 'true' : undefined} onclick={() => pickVersion(i)}>{v.label}<span>{ago(v.at)} · {fmtBytes(v.size)}</span></button></li>
-          {/each}
-        </ol>
-      </ToolSheet>
-    {/if}
+    <!-- One grid cell: a sheet that is sliding out and the one sliding in overlap, instead of stacking and squeezing the stage. -->
+    <div class="sheets">
+      {@render sheet?.()}
+      {#if versions && st.session && !hasSheet}
+        <ToolSheet title="Versions" oncancel={() => (versions = false)}>
+          <ol class="vlist">
+            {#each st.session.versions as v, i (v.id)}
+              <li><button type="button" aria-current={i === st.session.head ? 'true' : undefined} onclick={() => pickVersion(i)}>{v.label}<span>{ago(v.at)} · {fmtBytes(v.size)}</span></button></li>
+            {/each}
+          </ol>
+        </ToolSheet>
+      {/if}
+    </div>
   </svelte:element>
 
   {#if !locked && !versions && dock.length}<Dock items={dock} onpick={ondock} label={dockLabel} />{/if}
@@ -193,6 +196,8 @@
   :global(.studio-shell .sh-mi:hover:not(:disabled)) { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   :global(.studio-shell .sh-mi:hover:disabled) { background: none; }
   .main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .sheets { flex: none; display: grid; }
+  .sheets > :global(.sheet) { grid-area: 1 / 1; }
   .stage { position: relative; flex: 1; min-height: 0; display: grid; place-items: center; overflow: hidden; padding: 0; touch-action: none; transition: flex-basis 220ms ease; }
   .zoom-controls { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 0; }
   .zoom-controls button { min-width: 34px; min-height: 40px; padding: 0 4px; border: 0; border-radius: 8px; color: var(--ink); background: transparent; font: inherit; cursor: pointer; }

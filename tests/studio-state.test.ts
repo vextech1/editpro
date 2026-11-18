@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('$app/navigation', () => ({ goto: vi.fn(async () => {}) }));
 import { goto } from '$app/navigation';
-import { StudioState, sendTo, sendToTool } from '../src/lib/workspace.svelte';
+import { StudioState, GONE_NOTE, sendTo, sendToTool } from '../src/lib/workspace.svelte';
 import { getSessions, IdbSessionStore, Sessions } from '../src/lib/core/session';
 import { getLibrary } from '../src/lib/core/library';
 import { takePending } from '../src/lib/core/handoff';
@@ -41,6 +41,16 @@ describe('studio state', () => {
     await st.redo(); expect(await st.file!.text()).toBe('B');
     expect(await st.commit(new Blob(['B'], { type: 'application/pdf' }), 'again')).toBe(false);   // identical: no new version
     expect(st.session?.versions).toHaveLength(2);
+  });
+  it('keeps a change in memory, and says so, when the saved work was deleted elsewhere', async () => {
+    const st = new StudioState('document'); await st.open(pdf('A')); const id = st.session!.id;
+    await getSessions().discard(id);   // another tab deleted it (or it expired) while this one was open
+    expect(await st.commit(new Blob(['B'], { type: 'application/pdf' }), 'Crop PDF', 'r-crop.pdf')).toBe(true);   // not silently dropped
+    expect(await st.file!.text()).toBe('B'); expect(st.file!.name).toBe('r-crop.pdf');
+    expect(st.session).toBeUndefined(); expect(st.memoryOnly).toBe(true); expect(st.note).toBe(GONE_NOTE);
+    expect(await getSessions().get(id)).toBeUndefined();   // and it did not bring the deleted work back
+    expect(await st.commit(new Blob(['C'], { type: 'application/pdf' }), 'Next')).toBe(true);   // later edits carry on in memory
+    expect(await st.file!.text()).toBe('C');
   });
   it('rejects a result of another kind and keeps the file', async () => {
     const st = new StudioState('document'); await st.open(pdf('A'));
