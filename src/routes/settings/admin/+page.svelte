@@ -2,10 +2,10 @@
   import { onMount } from 'svelte';
   import { SITE } from '#lib/site.ts';
   import { fmtBytes } from '#lib/core/format.ts';
-  import { ALLOWED_EXT, CATEGORIES, type CategoryId } from '#lib/core/class-library.ts';
+  import { ALLOWED_EXT, CATEGORIES, MAX_LABEL, categoryKey, cleanLabel, type CategoryId } from '#lib/core/class-library.ts';
   import {
     CLOUD_MAX_BYTES, SPARK_STORAGE_BYTES, checkCloudUpload, checkStorage, chooseShard, cloudForSubject, deleteCloud, deleteTree, duplicateOf, emptyTrash,
-    ENTRY_OVERHEAD_BYTES, PART_OVERHEAD_BYTES, entryBytesFor, friendlyCloudError, sameNameAs, storageUsed, uploadCloud, type CloudFile, type TrashItem
+    ENTRY_OVERHEAD_BYTES, PART_OVERHEAD_BYTES, entryBytesFor, friendlyCloudError, relabelCloud, sameNameAs, storageUsed, uploadCloud, type CloudFile, type TrashItem
   } from '#lib/core/cloud-library.ts';
   import { isValidEmail, normalizeEmail } from '#lib/core/admins.ts';
   import {
@@ -33,7 +33,10 @@
   let tidied = false;
   let structure = $state<LibraryStructure>([]);
   let sectionId = $state(''); let classId = $state(''); let subjectId = $state('');
-  let category = $state<CategoryId>('notes');
+  // Which category chip is open: a built-in id, 'other:<label>' for a custom label, 'other' (older files with no label) or 'new' (writing a new label).
+  let activeKey = $state('notes');
+  let draftLabel = $state('');
+  let renaming = $state(false); let draftRename = $state('');
   let picked = $state<File[]>([]);
   let fileInput = $state<HTMLInputElement>();
   let busy = $state(false);
@@ -47,14 +50,32 @@
   const cls = $derived(section?.classes.find((item) => item.id === classId));
   const subject = $derived(cls?.subjects.find((item) => item.id === subjectId));
   const inSubject = $derived(cloudForSubject(all, sectionId, classId, subjectId));
-  const files = $derived(inSubject.filter((file) => file.category === category).sort((a, b) => a.title.localeCompare(b.title, 'en', { numeric: true })));
-  const catLabel = $derived(CATEGORIES.find((c) => c.id === category)?.label ?? '');
+  const customChips = $derived.by(() => {
+    const seen = new Map<string, { key: string; label: string; count: number }>();
+    for (const f of inSubject) {
+      const key = categoryKey(f); if (!key.startsWith('other:')) continue;
+      const hit = seen.get(key); if (hit) hit.count++; else seen.set(key, { key, label: f.label ?? '', count: 1 });
+    }
+    return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, 'en', { numeric: true }));
+  });
+  const plainOther = $derived(inSubject.filter((f) => categoryKey(f) === 'other').length);   // older files saved as plain "Other"
+  const category = $derived<CategoryId>(activeKey === 'new' || activeKey.startsWith('other') ? 'other' : (activeKey as CategoryId));
+  const labelText = $derived(activeKey === 'new' ? cleanLabel(draftLabel) : activeKey.startsWith('other:') ? (customChips.find((c) => c.key === activeKey)?.label ?? '') : '');
+  const viewKey = $derived(activeKey === 'new' ? (labelText ? `other:${labelText.toLowerCase()}` : '') : activeKey);
+  const files = $derived(inSubject.filter((file) => viewKey && categoryKey(file) === viewKey).sort((a, b) => a.title.localeCompare(b.title, 'en', { numeric: true })));
+  const catLabel = $derived(activeKey === 'new' ? (labelText || 'New label') : category === 'other' ? (labelText || 'Other') : (CATEGORIES.find((c) => c.id === category)?.label ?? ''));
+  const needsLabel = $derived(activeKey === 'new' && !labelText);
+  // A label chip disappears once its last file is deleted (or when another subject is opened): go back to Notes.
+  $effect(() => {
+    if (activeKey.startsWith('other:') && !customChips.some((c) => c.key === activeKey)) activeKey = 'notes';
+    else if (activeKey === 'other' && !plainOther) activeKey = 'notes';
+  });
   const checks = $derived(picked.map((f) => ({ file: f, result: checkCloudUpload(f.name, f.size) })));
   const good = $derived(checks.filter((c) => c.result.ok).map((c) => c.file));
   const used = $derived(storageUsed(all, trashItems) + studentTotals.bytes + studentTotals.count * (ENTRY_OVERHEAD_BYTES + 2 * PART_OVERHEAD_BYTES));
 
   const fail = (e: unknown) => { problem = withDetail(friendlyCloudError((e as { code?: string })?.code, ''), e); note = ''; };
-  const countIn = (id: CategoryId) => inSubject.filter((file) => file.category === id).length;
+  const countIn = (key: string) => inSubject.filter((file) => categoryKey(file) === key).length;
 
   async function refresh() {
     // adminList throws when part of the index cannot be read: better to stop than to show (or change) a Library with files missing.
@@ -173,8 +194,61 @@
     finally { busy = false; step = ''; }
   }
 
+  /** Opens a category chip (and closes the rename box of the one before it). */
+  function choose(key: string) { activeKey = key; renaming = false; clearPick(); }
+  /** The files of this subject under the open label, read fresh so a file added from another device is included. */
+  async function labelFilesNow(): Promise<CloudFile[]> {
+    const index = await freshIndex();
+    return cloudForSubject(index.files, sectionId, classId, subjectId).filter((f) => categoryKey(f) === viewKey);
+  }
+  function startRenameLabel() { renaming = true; draftRename = labelText || (category === 'other' ? '' : catLabel); note = ''; problem = ''; }
+
+  /** Renames the open label. Built-in names (Notes and so on) can be renamed too: their files then carry the new label. */
+  async function saveRenameLabel(event: SubmitEvent) {
+    event.preventDefault();
+    const next = cleanLabel(draftRename);
+    if (!next || !subject || !viewKey) return;
+    if (next.toLowerCase() === catLabel.toLowerCase()) { renaming = false; return; }
+    busy = true; step = 'Renaming'; note = ''; problem = '';
+    try {
+      const victims = await labelFilesNow();
+      if (!victims.length) { note = 'There are no files under that label any more.'; renaming = false; await refresh(); return; }
+      const clash = customChips.some((c) => c.key === `other:${next.toLowerCase()}` && c.key !== viewKey);
+      if (clash && !confirm(`“${next}” already exists in ${subject.name}. Move these files into it?`)) return;
+      await relabelCloud(await adminStore(), victims, next);
+      renaming = false;
+      await refresh();
+      activeKey = `other:${next.toLowerCase()}`;
+      note = `Renamed ${catLabel === next ? 'the label' : `“${catLabel}”`} to “${next}”. Students see it straight away.`;
+    } catch (e) {
+      fail(e); try { await refresh(); } catch { /* the list shows the last known state */ }
+    } finally { busy = false; step = ''; }
+  }
+
+  /** Deletes the open label together with its uploaded files (a label is only what its files carry), after asking. */
+  async function removeLabel() {
+    if (!subject || !viewKey) return;
+    const name = catLabel;
+    busy = true; step = 'Checking the Library'; note = ''; problem = '';
+    let victims: CloudFile[];
+    try { victims = await labelFilesNow(); } catch (e) { fail(e); busy = false; step = ''; return; }
+    if (!victims.length) { note = 'There are no files under that label any more.'; busy = false; step = ''; return; }
+    if (!confirm(`Delete the label “${name}” from ${subject.name}? This also permanently deletes ${victims.length} uploaded ${victims.length === 1 ? 'file' : 'files'}.`)) { busy = false; step = ''; return; }
+    step = 'Deleting';
+    try {
+      // One file at a time, and the section > class > subject catalog is not rewritten, so nothing another admin changed meanwhile is overwritten.
+      const store = await adminStore(); let done = 0;
+      try { for (const f of victims) { await deleteCloud(store, f.id, f.parts, f.shard ?? 0); done++; } }
+      finally { if (done) all = all.filter((file) => !victims.slice(0, done).some((victim) => victim.id === file.id)); }
+      renaming = false;
+      note = `Deleted “${name}”.`;
+    } catch (e) { fail(e); try { await refresh(); } catch { /* the list shows the last known state */ } }
+    finally { busy = false; step = ''; }
+  }
+
   async function upload() {
-    if (!good.length || !subject) return;
+    if (!good.length || !subject || needsLabel) return;
+    const newKey = labelText ? `other:${labelText.toLowerCase()}` : '';
     busy = true; step = 'Checking the Library'; problem = ''; note = '';
     // The Library is read fresh first: a file added or replaced from another device must count for the room check and the replace check.
     try { await freshIndex(); } catch (e) { fail(e); busy = false; step = ''; return; }
@@ -197,7 +271,7 @@
         const shard = chooseShard(sizes, entryBytes);
         const replaces = sameNameAs(files, file.name).map((old) => ({ id: old.id, parts: old.parts, shard: old.shard ?? 0 }));
         // New copy in and old copy out happen as one write, so students never see two copies or none.
-        await uploadCloud(store, new Uint8Array(await file.arrayBuffer()), { name: file.name, section: sectionId, cls: classId, subject: subjectId, category, shard, shardCount: sizes.length, replaces },
+        await uploadCloud(store, new Uint8Array(await file.arrayBuffer()), { name: file.name, section: sectionId, cls: classId, subject: subjectId, category, ...(labelText ? { label: labelText } : {}), shard, shardCount: sizes.length, replaces },
           (d, t) => (step = `Uploading ${label}: ${d} of ${t} parts`));
         added++; sizes[shard] = (sizes[shard] ?? 0) + entryBytes;
       }
@@ -206,7 +280,11 @@
     } catch (e) {
       fail(e);
       if (added) note = `Added ${added} of ${batch.length} before the problem.`;
-    } finally { try { await refresh(); } catch { /* the list shows the last known state */ } busy = false; step = ''; }
+    } finally {
+      try { await refresh(); } catch { /* the list shows the last known state */ }
+      if (added && activeKey === 'new' && newKey) { activeKey = newKey; draftLabel = ''; }   // the label now has files, so it has its own chip
+      busy = false; step = '';
+    }
   }
 
   async function remove(f: CloudFile) {
@@ -223,12 +301,11 @@
   }
 </script>
 
-<svelte:head><title>Library admin | {SITE.name}</title><meta name="robots" content="noindex" /><meta name="description" content="Add or delete Library files." /></svelte:head>
+<svelte:head><title>Admin | {SITE.name}</title><meta name="robots" content="noindex" /><meta name="description" content="Add or delete Library files." /></svelte:head>
 
 <div class="set admin">
   <p class="back"><a href="/settings">← Settings</a></p>
-  <h1>Library admin</h1>
-  <p class="lede">Add or delete the files students download from the Library. Students see a change straight away.</p>
+  <h1>Admin</h1>
 
   {#if !enabled}
     <section class="card">
@@ -240,7 +317,6 @@
   {:else if !session}
     <section class="card">
       <h2>Sign in</h2>
-      <p class="muted">Sign in with an admin Google account. Only the owner (the email in <code>firestore.rules</code>) and the helpers the owner adds here can add or delete files; everyone else can only download.</p>
       <button class="btn" type="button" onclick={signIn} disabled={busy}>{busy ? 'Signing in…' : 'Sign in with Google'}</button>
     </section>
   {:else}
@@ -311,10 +387,36 @@
 
     {#if subject}
         <div class="chips" role="group" aria-label="Category">
-          {#each CATEGORIES as c (c.id)}
-            <button type="button" class:on={category === c.id} aria-pressed={category === c.id} onclick={() => { category = c.id; clearPick(); }}>{c.label} ({countIn(c.id)})</button>
+          {#each CATEGORIES.filter((c) => c.id !== 'other') as c (c.id)}
+            <button type="button" class:on={activeKey === c.id} aria-pressed={activeKey === c.id} onclick={() => choose(c.id)}>{c.label} ({countIn(c.id)})</button>
           {/each}
+          {#each customChips as c (c.key)}
+            <button type="button" class:on={activeKey === c.key} aria-pressed={activeKey === c.key} onclick={() => choose(c.key)}>{c.label} ({c.count})</button>
+          {/each}
+          {#if plainOther}
+            <button type="button" class:on={activeKey === 'other'} aria-pressed={activeKey === 'other'} onclick={() => choose('other')}>Other ({plainOther})</button>
+          {/if}
+          <button type="button" class:on={activeKey === 'new'} aria-pressed={activeKey === 'new'} onclick={() => choose('new')}>+ Custom label</button>
         </div>
+        {#if activeKey !== 'new'}
+          <div class="actions">
+            <button class="btn small" type="button" onclick={startRenameLabel} disabled={busy || !files.length}>Rename label</button>
+            <button class="btn small danger" type="button" onclick={removeLabel} disabled={busy || !files.length}>Delete label</button>
+          </div>
+          {#if renaming}
+            <form class="editor" onsubmit={saveRenameLabel}>
+              <label for="rename-label">Rename “{catLabel}”</label>
+              <input id="rename-label" bind:value={draftRename} maxlength={MAX_LABEL} required />
+              <div class="actions"><button class="btn small" disabled={busy || !cleanLabel(draftRename)}>Save name</button><button class="btn small" type="button" onclick={() => (renaming = false)}>Cancel</button></div>
+            </form>
+          {/if}
+        {/if}
+        {#if activeKey === 'new'}
+          <div class="editor">
+            <label for="cat-label">Write your own label</label>
+            <input id="cat-label" bind:value={draftLabel} maxlength={MAX_LABEL} placeholder="e.g. Lab manuals" disabled={busy} />
+          </div>
+        {/if}
 
         <h2>Add to {subject.name} · {catLabel}</h2>
         <div class="card">
@@ -329,7 +431,7 @@
               {/each}
             </ul>
           {/if}
-          <button class="btn" type="button" onclick={upload} disabled={busy || !good.length}>
+          <button class="btn" type="button" onclick={upload} disabled={busy || !good.length || needsLabel}>
             {good.length ? `Add ${good.length} ${good.length === 1 ? 'file' : 'files'} to ${catLabel}` : 'Add files'}
           </button>
         </div>

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   CHUNK_BYTES, CLOUD_MAX_BYTES, INDEX_SHARD_BYTES, MAX_SHARDS, STORAGE_LIMIT_BYTES, UPLOAD_GRACE_MS, checkCloudUpload, checkStorage, chooseShard, cloudBytes, cloudForClass,
   cloudForSubject, deleteCloud, deleteTree, downloadCloud, duplicateOf, emptyTrash, entryBytesFor, fileViewerHref, friendlyCloudError, joinChunks, mimeOf, newFileId,
-  parseCloudIndex, parseShardCount, parseTrash, partId, readIndex, sameNameAs, splitChunks, storageUsed, storedSize, toClassFile, uploadCloud,
+  parseCloudIndex, parseShardCount, parseTrash, partId, readIndex, relabelCloud, sameNameAs, splitChunks, storageUsed, storedSize, toClassFile, uploadCloud,
   type CloudEntry, type CloudStore, type TrashItem
 } from '../src/lib/core/cloud-library';
 
@@ -21,6 +21,10 @@ function memoryStore(opts: { failPutAt?: number; failSetEntry?: boolean; failRem
     async deleteParts(id, n) { if (opts.failDeleteParts) throw new Error('delete failed'); for (let i = 0; i < n; i++) parts.delete(`${id}/${i}`); log.push(`deleteParts ${n}`); },
     async setEntry(id, e, shard) { if (opts.failSetEntry) throw new Error('index failed'); entries.set(id, e); shardOf.set(id, shard); log.push(`setEntry s${shard}`); },
     async removeEntry(id, shard) { if (opts.failRemoveEntry) throw new Error('remove failed'); entries.delete(id); shardOf.delete(id); log.push(`removeEntry s${shard}`); },
+    async relabelEntries(items, label) {
+      for (const { id } of items) { const e = entries.get(id); if (e) entries.set(id, { ...e, category: 'other', label }); }   // a deleted entry is skipped, like the real store
+      log.push(`relabelEntries ${items.length}`);
+    },
     async replaceEntries(add, remove) {
       entries.set(add.id, add.entry); shardOf.set(add.id, add.shard);
       for (const r of remove) { entries.delete(r.id); shardOf.delete(r.id); }
@@ -307,5 +311,17 @@ describe('friendlyCloudError', () => {
     expect(friendlyCloudError('unavailable')).toMatch(/internet/);
     expect(friendlyCloudError('weird')).toMatch(/Something went wrong/);
     expect(friendlyCloudError(undefined, 'custom')).toBe('custom');
+  });
+});
+
+describe('relabelCloud keeps other changes safe', () => {
+  const entry = (name: string): CloudEntry => ({ name, title: name, size: 5, ext: 'pdf', section: 's', cls: 'c', subject: 'x', category: 'notes', added: '2026-01-02', parts: 1 });
+  it('changes only the label and category, and does not bring back a file deleted meanwhile', async () => {
+    const m = memoryStore();
+    m.entries.set('kept', entry('kept.pdf')); m.entries.set('gone', entry('gone.pdf'));
+    m.entries.delete('gone');   // another admin deleted it after this page read the list
+    await relabelCloud(m.store, [{ id: 'kept', ...entry('kept.pdf'), shard: 0 }, { id: 'gone', ...entry('gone.pdf'), shard: 0 }], 'Lab manuals');
+    expect(m.entries.get('kept')).toMatchObject({ name: 'kept.pdf', category: 'other', label: 'Lab manuals' });
+    expect(m.entries.has('gone')).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 rules_version = '2';
-// Rules for the Library's uploaded files (Settings > Library admin).
+// Rules for the Library's uploaded files (Settings > Admin).
 // Anyone can fetch a document, so students can download. Only the owner (the address below) and the helpers the owner adds on the Library
 // admin page can add, change or delete. EDIT the owner address if it changes, then publish with:  firebase deploy --only firestore:rules
 service cloud.firestore {
@@ -70,7 +70,7 @@ service cloud.firestore {
     }
 
     function validUserFile(d) {
-      return d.keys().hasOnly(['uploader', 'title', 'name', 'size', 'ext', 'section', 'cls', 'subject', 'category', 'added', 'parts', 'sha', 'status'])
+      return d.keys().hasOnly(['uploader', 'title', 'name', 'size', 'ext', 'section', 'cls', 'subject', 'category', 'label', 'added', 'parts', 'sha', 'status'])
         && d.keys().hasAll(['uploader', 'title', 'name', 'size', 'ext', 'section', 'cls', 'category', 'added', 'parts', 'status'])
         && d.uploader == request.auth.uid && d.status == 'uploading'
         && d.size is int && d.size >= 10000 && d.size <= 5242880
@@ -82,6 +82,7 @@ service cloud.firestore {
         && d.section is string && d.section.size() >= 1 && d.section.size() <= 80
         && d.cls is string && d.cls.size() >= 1 && d.cls.size() <= 80
         && d.added is string && d.added.size() == 10
+        && (!('label' in d) || (d.category == 'other' && d.label is string && d.label.size() >= 1 && d.label.size() <= 40))
         && (!('subject' in d) || (d.subject is string && d.subject.size() <= 80))
         && (!('sha' in d) || (d.sha is string && d.sha.size() == 64));
     }

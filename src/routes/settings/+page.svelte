@@ -10,7 +10,7 @@
   import { applyTheme, clearPrefs, getOcrLang, getTheme, setOcrLang, setTheme, getRetentionDays, setRetentionDays, RETENTION_CHOICES, type Theme } from '#lib/core/settings.ts';
 
   const themes: [Theme, string][] = [['system', 'System'], ['dark', 'Dark'], ['light', 'Light']];
-  const links = [['/settings/account', 'My account', 'Sign in, your shared documents and downloads'], ['/settings/admin', 'Library admin', 'Add or delete Library files (site owner)'], ['/library?trash=1', 'Trash', 'Deleted files, kept for 30 days'], ['/faq', 'FAQ', 'Common questions'], ['/contact', 'Contact', 'Get in touch'],
+  const links = [['/settings/account', 'My account', 'Sign in, your shared documents and downloads'], ['/settings/admin', 'Admin', ''], ['/library?trash=1', 'Trash', 'Deleted files, kept for 30 days'], ['/faq', 'FAQ', 'Common questions'], ['/contact', 'Contact', 'Get in touch'],
     ['/privacy', 'Privacy policy', ''], ['/terms', 'Terms of use', '']];
   let theme = $state<Theme>('system'); let lang = $state('eng');
   let used = $state(0); let quota = $state(0); let count = $state(0); let unavailable = $state(false); let note = $state('');
@@ -29,8 +29,9 @@
   onMount(() => { theme = getTheme(); lang = getOcrLang(codes); keep = getRetentionDays(); measure(); void persistState().then((v) => { safe = v; }); });
   function pickTheme(t: Theme) { theme = t; setTheme(t); applyTheme(t); }
   function pickLang() { setOcrLang(lang); note = 'Saved.'; }
+  let confirming = $state(false);
   async function wipe() {
-    if (!confirm('Delete all saved files and reset your settings on this device? This cannot be undone.')) return;
+    confirming = false;
     try { await getLibrary().clearAll(); } catch { /* storage unavailable */ }
     try { await getSessions().clearAll(); } catch { /* storage unavailable */ }
     clearPrefs(); theme = 'system'; lang = 'eng'; keep = 7; applyTheme('system'); await measure(); note = 'All saved files and settings were removed.';
@@ -61,12 +62,17 @@
 {#if unavailable}
   <p class="muted">Saved files are not available in this browser.</p>
 {:else}
-  <div class="setrow"><span>Using {fmtBytes(used)}{#if quota} of about {fmtBytes(quota)}{/if}<div class="sub">{count} saved {count === 1 ? 'file' : 'files'}, including the trash</div></span>
-    <button class="btn small danger" type="button" onclick={wipe} disabled={!count && !used}>Clear all</button></div>
+  <div class="setrow"><span class="grow">Clearing storage will clear all files</span>
+    <button class="btn small danger" type="button" onclick={() => (confirming = true)} disabled={confirming || (!count && !used)}>Clear all</button></div>
+  {#if confirming}
+    <div class="confirm-card" role="alertdialog" aria-labelledby="clear-title" aria-describedby="clear-desc">
+      <strong id="clear-title">Clear all files?</strong>
+      <p id="clear-desc" class="sub">Clearing storage will clear all files. This cannot be undone.</p>
+      <div class="actions"><button class="btn small danger" type="button" onclick={wipe}>Yes, clear all</button><button class="btn small" type="button" onclick={() => (confirming = false)}>Cancel</button></div>
+    </div>
+  {/if}
 {/if}
-{#if safe === 'persisted'}
-  <div class="setrow"><span>Saved files are protected<div class="sub">Your browser will not clear them to free up space.</div></span></div>
-{:else if safe === 'not-persisted'}
+{#if safe === 'not-persisted'}
   <div class="setrow"><span class="grow">Saved files are not protected<div class="sub">Your browser may clear them if this device runs low on space.</div></span>
     <button class="btn small" type="button" onclick={protect}>Protect my files</button></div>
 {/if}

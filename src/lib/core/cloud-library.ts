@@ -1,11 +1,11 @@
-// Library files uploaded from the website (Settings > Library admin), kept in Firebase Firestore so the free Spark plan is enough.
+// Library files uploaded from the website (Settings > Admin), kept in Firebase Firestore so the free Spark plan is enough.
 // Cloud Storage needs the paid Blaze plan, so each file is cut into pieces that fit Firestore's 1 MiB document limit:
 //   library/index                          one document listing every uploaded file (a page view costs one read)
 //   library/structure                      section > class > subject catalog, managed in the admin page
 //   libraryChunks/<file id>/parts/<0000..> the file's bytes, one piece per document
 // This file is the browser-safe logic (checks, cutting, joining, upload and delete order). The Firebase calls live in #lib/cloud/firebase.ts.
 import type { LibraryStructure } from '#lib/core/library-structure.ts';
-import { CATEGORIES, ALLOWED_EXT, extOf, isAllowedExt, titleFromFilename, type CategoryId, type ClassFile } from '#lib/core/class-library.ts';
+import { CATEGORIES, ALLOWED_EXT, cleanLabel, extOf, isAllowedExt, titleFromFilename, type CategoryId, type ClassFile } from '#lib/core/class-library.ts';
 
 /** Bytes per piece. Under the 1 MiB document limit with room for the field name and path. */
 export const CHUNK_BYTES = 800_000;
@@ -24,6 +24,8 @@ export interface CloudEntry {
   name: string; title: string; size: number; ext: string;
   /** Stable IDs in the admin-managed section > class > subject catalog. */
   section: string; cls: string; subject?: string; category: CategoryId; added: string; parts: number;
+  /** Custom label for the 'other' category (what the admin typed). */
+  label?: string;
 }
 /** `shard` says which index document lists the file (0 is `library/index`). It is worked out when the index is read; it is not stored in the entry. */
 export interface CloudFile extends CloudEntry { id: string; shard?: number }
@@ -138,19 +140,19 @@ export function parseCloudIndex(data: unknown): CloudFile[] {
   for (const [id, raw] of Object.entries(files as Record<string, unknown>)) {
     const e = raw as Partial<Record<keyof CloudEntry, unknown>> | null;
     if (!ID.test(id) || !e || typeof e !== 'object') continue;
-    const { name, title, size, ext, section, cls, subject, category, added, parts } = e;
+    const { name, title, size, ext, section, cls, subject, category, added, parts, label } = e;
     if (typeof name !== 'string' || !name || BAD_NAME.test(name) || typeof ext !== 'string' || !isAllowedExt(ext)) continue;
     if (typeof section !== 'string' || !section || typeof cls !== 'string' || !cls || !isCategory(category)) continue;
     if (subject !== undefined && typeof subject !== 'string') continue;
     if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) continue;
     if (typeof parts !== 'number' || !Number.isInteger(parts) || parts < 1 || parts > MAX_PARTS + 1) continue;
-    out.push({ id, name, title: typeof title === 'string' && title.trim() ? title.trim() : titleFromFilename(name), size, ext, section, cls, ...(typeof subject === 'string' ? { subject } : {}), category, added: typeof added === 'string' && DATE.test(added) ? added : '', parts });
+    out.push({ id, name, title: typeof title === 'string' && title.trim() ? title.trim() : titleFromFilename(name), size, ext, section, cls, ...(typeof subject === 'string' ? { subject } : {}), category, ...(category === 'other' && cleanLabel(label) ? { label: cleanLabel(label) } : {}), added: typeof added === 'string' && DATE.test(added) ? added : '', parts });
   }
   return out;
 }
 
 export const toClassFile = (f: CloudFile): ClassFile => ({
-  id: `cloud/${f.id}`, name: f.name, title: f.title, size: f.size, ext: f.ext, category: f.category,
+  id: `cloud/${f.id}`, name: f.name, title: f.title, size: f.size, ext: f.ext, category: f.category, ...(f.label ? { label: f.label } : {}),
   added: f.added || undefined, cloud: { id: f.id, parts: f.parts }
 });
 export const fileViewerHref = (id: string): string => `/class-library/file?id=${encodeURIComponent(id)}`;
@@ -187,6 +189,11 @@ export interface CloudStore {
   /** `shard` is the index document the entry goes in (0 is the first). */
   setEntry(id: string, entry: CloudEntry, shard: number): Promise<void>;
   removeEntry(id: string, shard: number): Promise<void>;
+  /**
+   * Gives existing entries a custom label (category 'other'), changing only those two fields, in one all-or-nothing write per index document.
+   * An entry that was deleted in the meantime (from another device or by another admin) is skipped, never brought back.
+   */
+  relabelEntries(items: { id: string; shard: number }[], label: string): Promise<void>;
   /** In ONE all-or-nothing write: adds the new entry and removes the entries it replaces, so students never see two copies or none. */
   replaceEntries(add: { id: string; entry: CloudEntry; shard: number }, remove: { id: string; shard: number }[]): Promise<void>;
   /**
@@ -267,7 +274,7 @@ export async function emptyTrash(store: CloudStore, liveIds: ReadonlySet<string>
  */
 export async function uploadCloud(
   store: CloudStore, bytes: Uint8Array,
-  meta: { name: string; title?: string; section: string; cls: string; subject?: string; category: CategoryId; added?: string; shard?: number; shardCount?: number; replaces?: { id: string; parts: number; shard?: number }[] },
+  meta: { name: string; title?: string; section: string; cls: string; subject?: string; category: CategoryId; label?: string; added?: string; shard?: number; shardCount?: number; replaces?: { id: string; parts: number; shard?: number }[] },
   onProgress: (done: number, total: number) => void = () => {}, makeId: () => string = newFileId
 ): Promise<string> {
   const chunks = splitChunks(bytes);
@@ -284,7 +291,7 @@ export async function uploadCloud(
     for (const r of replaces) await store.markTrash({ id: r.id, parts: r.parts, kind: 'delete', at: Date.now() });
     const entry: CloudEntry = {
       name: meta.name, title: meta.title?.trim() || titleFromFilename(meta.name), size: bytes.length, ext: extOf(meta.name),
-      section: meta.section, cls: meta.cls, ...(meta.subject ? { subject: meta.subject } : {}), category: meta.category, added: meta.added ?? todayLocal(), parts: chunks.length
+      section: meta.section, cls: meta.cls, ...(meta.subject ? { subject: meta.subject } : {}), category: meta.category, ...(meta.category === 'other' && cleanLabel(meta.label) ? { label: cleanLabel(meta.label) } : {}), added: meta.added ?? todayLocal(), parts: chunks.length
     };
     indexTouched = true;
     if (replaces.length) await store.replaceEntries({ id, entry, shard }, replaces.map((r) => ({ id: r.id, shard: r.shard ?? 0 })));   // new copy in, old copies out, together
@@ -336,6 +343,13 @@ export async function deleteCloud(store: CloudStore, id: string, parts: number, 
   try { await store.clearTrash(id); } catch { /* the pieces are gone; a leftover record only repeats a harmless delete */ }
 }
 
+/** Gives these files a custom label (they are kept under the 'other' category). Only the label and category change, and a file deleted meanwhile is not restored. */
+export async function relabelCloud(store: CloudStore, files: CloudFile[], label: string): Promise<void> {
+  const clean = cleanLabel(label);
+  if (!clean) throw new Error('A label needs some text.');
+  if (files.length) await store.relabelEntries(files.map((f) => ({ id: f.id, shard: f.shard ?? 0 })), clean);
+}
+
 /** Reads every piece (a few at a time) and joins them. Throws if one is missing. */
 export async function downloadCloud(store: CloudStore, id: string, parts: number, onProgress: (done: number, total: number) => void = () => {}, parallel = 4): Promise<Uint8Array> {
   const got: Uint8Array[] = new Array(parts);
@@ -350,7 +364,7 @@ export async function downloadCloud(store: CloudStore, id: string, parts: number
 /** Plain-language messages for the errors Firebase can give. `code` is the error's code, for example "permission-denied". */
 export function friendlyCloudError(code: string | undefined, fallback = ''): string {
   const c = (code ?? '').replace(/^(firestore|auth)\//, '');
-  if (c === 'permission-denied') return 'This Google account is not allowed to change the Library. Sign in with the admin account, or ask the owner to add this email under Admins on the Library admin page.';
+  if (c === 'permission-denied') return 'This Google account is not allowed to change the Library. Sign in with the admin account, or ask the owner to add this email under Admins on the Admin page.';
   if (c === 'resource-exhausted' || c === 'quota-exceeded') return 'The free daily limit was reached. Try again tomorrow.';
   if (c === 'unavailable' || c === 'network-request-failed' || c === 'deadline-exceeded') return 'Could not reach Firebase. Check your internet connection and try again.';
   if (c === 'popup-closed-by-user' || c === 'cancelled-popup-request' || c === 'user-cancelled') return 'Sign-in was cancelled.';

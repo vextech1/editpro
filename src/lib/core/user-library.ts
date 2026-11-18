@@ -1,6 +1,6 @@
 // Student-shared study files stored beside the owner's Library files in Firestore.
 import { CHUNK_BYTES, ID_PATTERN, checkCloudUpload, newFileId, splitChunks, todayLocal, type UploadCheck } from '#lib/core/cloud-library.ts';
-import { CATEGORIES, extOf, titleFromFilename, type CategoryId, type ClassFile } from '#lib/core/class-library.ts';
+import { CATEGORIES, cleanLabel, extOf, titleFromFilename, type CategoryId, type ClassFile } from '#lib/core/class-library.ts';
 
 export const USER_MAX_BYTES = 5 * 1024 * 1024;
 export const USER_MIN_BYTES = 10_000;
@@ -15,6 +15,8 @@ export type UserFileStatus = 'uploading' | 'live' | 'pulled';
 export interface UserFileEntry {
   uploader: string; title: string; name: string; size: number; ext: string;
   section: string; cls: string; subject?: string; category: CategoryId; added: string; parts: number;
+  /** The student's own label, used only with the 'other' category. */
+  label?: string;
   sha?: string;
   status: UserFileStatus; pulledReason?: string; cleaned?: boolean;
 }
@@ -48,11 +50,12 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export interface UserMeta { name: string; title?: string; section: string; cls: string; subject?: string; category: CategoryId }
+export interface UserMeta { name: string; title?: string; section: string; cls: string; subject?: string; category: CategoryId; label?: string }
 export function buildUserEntry(uploader: string, meta: UserMeta, size: number, parts: number, sha: string | undefined, added = todayLocal()): UserFileEntry {
   return {
     uploader, title: (meta.title?.trim() || titleFromFilename(meta.name)).slice(0, MAX_TITLE), name: meta.name, size, ext: extOf(meta.name),
     section: meta.section, cls: meta.cls, ...(meta.subject ? { subject: meta.subject } : {}), category: meta.category, added, parts,
+    ...(meta.category === 'other' && cleanLabel(meta.label) ? { label: cleanLabel(meta.label) } : {}),
     ...(sha ? { sha } : {}), status: 'uploading'
   };
 }
@@ -101,7 +104,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 export function parseUserFile(id: string, data: unknown): UserFile | null {
   const d = data as Partial<Record<keyof UserFileEntry, unknown>> | null;
   if (!ID_PATTERN.test(id) || !d || typeof d !== 'object') return null;
-  const { uploader, title, name, size, ext, section, cls, subject, category, added, parts, sha, status, pulledReason, cleaned } = d;
+  const { uploader, title, name, size, ext, section, cls, subject, category, added, parts, sha, status, pulledReason, cleaned, label } = d;
   if (typeof uploader !== 'string' || !uploader || typeof name !== 'string' || !name || typeof ext !== 'string' || !isUserExt(ext)) return null;
   if (extOf(name) !== ext || typeof section !== 'string' || !section || typeof cls !== 'string' || !cls || typeof category !== 'string' || !CATEGORY_IDS.has(category)) return null;
   if (subject !== undefined && typeof subject !== 'string') return null;
@@ -110,6 +113,7 @@ export function parseUserFile(id: string, data: unknown): UserFile | null {
   if (typeof status !== 'string' || !STATUSES.has(status)) return null;
   return {
     id, uploader, name, ext, size, section, cls, ...(typeof subject === 'string' ? { subject } : {}), category: category as CategoryId, parts,
+    ...(category === 'other' && cleanLabel(label) ? { label: cleanLabel(label) } : {}),
     title: typeof title === 'string' && title.trim() ? title.trim().slice(0, MAX_TITLE) : titleFromFilename(name),
     added: typeof added === 'string' && DATE.test(added) ? added : '', status: status as UserFileStatus,
     ...(typeof sha === 'string' && /^[0-9a-f]{64}$/.test(sha) ? { sha } : {}),
@@ -119,7 +123,7 @@ export function parseUserFile(id: string, data: unknown): UserFile | null {
 }
 
 export const toUserClassFile = (f: UserFile): ClassFile => ({
-  id: `user/${f.id}`, name: f.name, title: f.title, size: f.size, ext: f.ext, category: f.category, added: f.added || undefined,
+  id: `user/${f.id}`, name: f.name, title: f.title, size: f.size, ext: f.ext, category: f.category, ...(f.label ? { label: f.label } : {}), added: f.added || undefined,
   cloud: { id: f.id, parts: f.parts, user: true }, uploader: f.uploader, student: true
 });
 export const userFilesFor = (files: UserFile[], section: string, cls: string, subject?: string): UserFile[] =>

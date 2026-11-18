@@ -58,6 +58,20 @@ function makeStore({ fs, db }: Awaited<ReturnType<typeof openFirebase>>, student
     async deleteParts(id, count) { await deleteAllParts(count, (i) => fs.deleteDoc(part(id, i)), async (i) => (await fs.getDoc(part(id, i))).exists()); },
     async setEntry(id, entry: CloudEntry, shard) { await fs.setDoc(shardDoc(shard), { files: { [id]: entry } }, { merge: true }); },
     async removeEntry(id, shard) { await fs.setDoc(shardDoc(shard), { files: { [id]: fs.deleteField() } }, { merge: true }); },
+    async relabelEntries(items, label) {
+      const byShard = new Map<number, string[]>();
+      for (const { id, shard } of items) byShard.set(shard, [...(byShard.get(shard) ?? []), id]);
+      for (const [shard, ids] of byShard) {
+        const ref = shardDoc(shard);
+        // Read and write together, so an entry removed by someone else a moment ago is left removed instead of being recreated.
+        await fs.runTransaction(db, async (tx) => {
+          const listed = ((await tx.get(ref)).data()?.files ?? {}) as Record<string, unknown>;
+          const update: Record<string, string> = {};
+          for (const id of ids) if (listed[id]) { update[`files.${id}.category`] = 'other'; update[`files.${id}.label`] = label; }
+          if (Object.keys(update).length) tx.update(ref, update);
+        });
+      }
+    },
     async replaceEntries(add, remove) {
       const batch = fs.writeBatch(db);
       batch.set(shardDoc(add.shard), { files: { [add.id]: add.entry } }, { merge: true });

@@ -139,14 +139,14 @@
   <section class="card empty"><h1>File unavailable</h1><p role="alert" class="warn">{problem}</p></section>
 {:else if file && locked}
   <section class="card empty">
-    <p class="eyebrow">{categoryLabel(file.category)} · {file.ext.toUpperCase()} · {fmtBytes(file.size)}</p>
+    <p class="eyebrow">{categoryLabel(file.category, file.label)} · {file.ext.toUpperCase()} · {fmtBytes(file.size)}</p>
     <h1>{file.title}</h1>
     <p class="muted">Your first download is free. To open more files, sign in with Google and share a study document to unlock more downloads.</p>
     <button class="btn" type="button" onclick={() => { loading = true; void loadFile(file!.id, ++generation); }}>Continue</button>
   </section>
 {:else if file}
   <div class="file-head">
-    <div class="file-title"><p class="eyebrow">{categoryLabel(file.category)} · {file.ext.toUpperCase()} · {fmtBytes(file.size)}</p><h1>{file.title}</h1></div>
+    <div class="file-title"><p class="eyebrow">{categoryLabel(file.category, file.label)} · {file.ext.toUpperCase()} · {fmtBytes(file.size)}</p><h1>{file.title}</h1></div>
     <div class="actions">
       {#if canRead}<button class="btn small" type="button" onclick={startReading}>Read</button>{/if}
       <button class="btn small {canRead ? 'ghost' : ''}" type="button" onclick={editFile} disabled={!kind || busy || !content} title={kind ? `Edit in ${studio}` : 'Studio editing is available for PDFs and images'}>{busy ? 'Working…' : kind ? `Edit in ${studio}` : 'Edit unavailable'}</button>

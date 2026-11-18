@@ -2,7 +2,7 @@
   import { page } from '$app/state';
   import { SITE } from '#lib/site.ts';
   import { onMount } from 'svelte';
-  import { CATEGORIES, countLabel, filterFiles, libraryHref, sortFiles, type CategoryId } from '#lib/core/class-library.ts';
+  import { CATEGORIES, categoryKey, categoryLabel, countLabel, filterFiles, libraryHref, sortFiles } from '#lib/core/class-library.ts';
   import { toClassFile } from '#lib/core/cloud-library.ts';
   import { forgetUserFiles, listLiveUserFiles } from '#lib/cloud/user.ts';
   import { openShare } from '#lib/cloud/member.svelte.ts';
@@ -13,7 +13,7 @@
   import AccessGate from '#lib/components/AccessGate.svelte';
   let { data } = $props();
   let text = $state('');
-  let category = $state<CategoryId | 'all'>('all');
+  let category = $state<string>('all');
   const cloud = useCloud(); onMount(cloud.load);
   const sectionId = $derived(page.url.searchParams.get('section') ?? '');
   const classId = $derived(page.url.searchParams.get('class') ?? '');
@@ -57,8 +57,16 @@
   const allFiles = $derived(sortFiles([...libraryFiles, ...sharedFiles]));
   const subjectFiles = $derived(allFiles.filter((f) => f.sectionId === sectionId && f.classId === classId && f.subjectId === subjectId));
   const classLevelFiles = $derived(allFiles.filter((f) => f.sectionId === sectionId && f.classId === classId && !f.subjectId));
-  const visibleFiles = $derived(subjectFiles.filter((file) => category === 'all' || file.category === category));
-  const categoryCounts = $derived(CATEGORIES.map((item) => ({ ...item, count: subjectFiles.filter((file) => file.category === item.id).length })));
+  const visibleFiles = $derived(subjectFiles.filter((file) => category === 'all' || categoryKey(file) === category));
+  const categoryCounts = $derived.by(() => {
+    const counts = new Map<string, { id: string; label: string; count: number }>();
+    for (const file of subjectFiles) {
+      const id = categoryKey(file); const hit = counts.get(id);
+      if (hit) hit.count++; else counts.set(id, { id, label: categoryLabel(file.category, (file as { label?: string }).label), count: 1 });
+    }
+    const order = (id: string) => { const i = CATEGORIES.findIndex((c) => c.id === id); return i < 0 ? CATEGORIES.length : i; };
+    return [...counts.values()].sort((a, b) => order(a.id) - order(b.id) || a.label.localeCompare(b.label));
+  });
   const hits = $derived(filterFiles(allFiles, { text, extra: (file) => file.classTitle }));
 
   /** Ask Firebase for the newest lists now, instead of using the copies saved on this device. */

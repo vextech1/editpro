@@ -25,7 +25,7 @@
     } catch (e) { failed = downloadErrorMessage(e); }
     finally { progress = ''; }
   }
-  const detail = $derived([categoryLabel(file.category), file.ext.toUpperCase(), fmtBytes(file.size), fmtAdded(file.added)].filter(Boolean).join(' · '));
+  const detail = $derived([categoryLabel(file.category, file.label), file.ext.toUpperCase(), fmtBytes(file.size), fmtAdded(file.added)].filter(Boolean).join(' · '));
   const viewerHref = $derived(file.cloud ? fileViewerHref(file.cloud.id) : '#');
 </script>
 

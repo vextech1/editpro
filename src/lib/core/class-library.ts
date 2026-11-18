@@ -9,13 +9,22 @@ export const CATEGORIES: { id: CategoryId; label: string }[] = [
   { id: 'past-papers', label: 'Past papers' },
   { id: 'other', label: 'Other' }
 ];
-export const categoryLabel = (id: CategoryId) => CATEGORIES.find((c) => c.id === id)?.label ?? 'Other';
+/** Longest custom label an admin can write. */
+export const MAX_LABEL = 40;
+/** A typed label with stray spaces removed and its length capped; '' when nothing useful was typed. */
+export const cleanLabel = (s: unknown): string => (typeof s === 'string' ? s.replace(/\s+/g, ' ').trim().slice(0, MAX_LABEL) : '');
+/** The words shown for a file's category. An admin's own label (kept with the 'other' category) wins over the plain name. */
+export const categoryLabel = (id: CategoryId, label?: string) => (id === 'other' && cleanLabel(label)) || (CATEGORIES.find((c) => c.id === id)?.label ?? 'Other');
+/** One key per chip: the built-in category id, or `other:<label>` for each custom label (case-insensitive). */
+export const categoryKey = (f: { category: CategoryId; label?: string }): string => (f.category === 'other' && cleanLabel(f.label) ? `other:${cleanLabel(f.label).toLowerCase()}` : f.category);
 
 /** File types accepted by the Library upload form. */
 export const ALLOWED_EXT = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'zip', 'png', 'jpg', 'jpeg'] as const;
 
 export interface ClassFile {
   id: string; name: string; title: string; size: number; ext: string; category: CategoryId;
+  /** The admin's own label, used only with the 'other' category. */
+  label?: string;
   /** YYYY-MM-DD. */
   added?: string;
   cloud: { id: string; parts: number; user?: boolean };
