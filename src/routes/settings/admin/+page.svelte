@@ -17,6 +17,7 @@
     renameClass, renameSection, renameSubject, type LibraryStructure
   } from '#lib/core/library-structure.ts';
   import StudentModeration from '#lib/components/StudentModeration.svelte';
+  import { withDetail } from '#lib/core/error-detail.ts';
 
   const ACCEPT = ALLOWED_EXT.map((e) => '.' + e).join(',');
   const enabled = cloudEnabled();
@@ -52,7 +53,7 @@
   const good = $derived(checks.filter((c) => c.result.ok).map((c) => c.file));
   const used = $derived(storageUsed(all, trashItems) + studentTotals.bytes + studentTotals.count * (ENTRY_OVERHEAD_BYTES + 2 * PART_OVERHEAD_BYTES));
 
-  const fail = (e: unknown) => { problem = friendlyCloudError((e as { code?: string })?.code, ''); note = ''; };
+  const fail = (e: unknown) => { problem = withDetail(friendlyCloudError((e as { code?: string })?.code, ''), e); note = ''; };
   const countIn = (id: CategoryId) => inSubject.filter((file) => file.category === id).length;
 
   async function refresh() {

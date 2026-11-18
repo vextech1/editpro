@@ -4,6 +4,7 @@
   import { REASON_CHOICES, checkReason } from '#lib/core/moderation.ts';
   import { categoryLabel } from '#lib/core/class-library.ts';
   import { fmtBytes } from '#lib/core/format.ts';
+  import { withDetail } from '#lib/core/error-detail.ts';
   import type { UserFile, UserFileStatus } from '#lib/core/user-library.ts';
 
   /** Called with how much room the live student documents take, so the admin page can count them in its storage meter. */
@@ -18,7 +19,7 @@
       const [found, open, usage] = await Promise.all([listStudentFiles(tab), getUserUploadsOpen(), studentUsage()]);
       files = found; uploadsOpen = open; onUsage?.(usage);
     }
-    catch { problem = 'Student documents could not be loaded. Check Firebase permissions and try again.'; }
+    catch (e) { problem = withDetail('Student documents could not be loaded.', e); }
     finally { loading = false; }
   }
   onMount(() => { void refresh(); return () => closePreview(); });
@@ -27,7 +28,7 @@
   async function toggleUploads() {
     busy = true; problem = ''; note = '';
     try { await setUserUploadsOpen(!uploadsOpen); uploadsOpen = !uploadsOpen; note = uploadsOpen ? 'Student uploads are open.' : 'Student uploads are paused.'; }
-    catch { problem = 'The upload setting could not be changed. Check Firebase permissions.'; }
+    catch (e) { problem = withDetail('The upload setting could not be changed.', e); }
     finally { busy = false; }
   }
   async function show(file: UserFile) {
@@ -35,7 +36,7 @@
     try {
       const blob = await previewStudentFile(file); const kind = file.ext === 'pdf' ? 'pdf' : ['png', 'jpg', 'jpeg'].includes(file.ext) ? 'image' : file.ext === 'txt' ? 'text' : 'file';
       preview = { id: file.id, url: URL.createObjectURL(blob), kind, text: kind === 'text' ? await blob.text() : '' };
-    } catch { problem = 'The document preview could not be loaded.'; }
+    } catch (e) { problem = withDetail('The document preview could not be loaded.', e); }
     finally { busy = false; }
   }
   async function confirmPull() {
@@ -45,20 +46,20 @@
     try {
       const file = pulling; const result = await pullFile(file, checked.reason); pulling = undefined; closePreview(); await refresh();
       note = `“${file.title}” was removed and its uploader was notified.${result.cleaned ? '' : ' Stored pieces still need cleanup; retry in the Pulled tab.'}`;
-    } catch { problem = 'The document could not be removed. Try again.'; }
+    } catch (e) { problem = withDetail('The document could not be removed.', e); }
     finally { busy = false; }
   }
   async function retry(file: UserFile) {
     busy = true; problem = '';
     try { if (await retryFilePieces(file)) { note = 'Stored pieces were deleted.'; await refresh(); } else problem = 'Stored pieces could not be deleted. Try again later.'; }
-    catch { problem = 'Cleanup could not be completed.'; }
+    catch (e) { problem = withDetail('Cleanup could not be completed.', e); }
     finally { busy = false; }
   }
   async function remove(file: UserFile) {
     if (!confirm(`Delete the record for “${file.title}”?`)) return;
     busy = true; problem = '';
     try { await deleteFileRecord(file); await refresh(); note = 'Record deleted.'; }
-    catch { problem = 'The record could not be deleted.'; }
+    catch (e) { problem = withDetail('The record could not be deleted.', e); }
     finally { busy = false; }
   }
 </script>
