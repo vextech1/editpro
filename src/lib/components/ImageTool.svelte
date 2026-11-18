@@ -93,7 +93,7 @@
 {#if zip}<div style="margin-bottom:10px"><ResultRow name="All results" bytes={zip.bytes} url={zip.url} filename={mode === 'compress' ? 'compressed-images.zip' : 'converted-images.zip'} label="Download all (ZIP)" /></div>{/if}
 <ul class="rows">
   {#each results as r}
-    <li class="row"><div class="grow"><strong>{r.name}</strong>
+    <li class="row result"><div class="grow"><strong>{r.name}</strong>
       {#if r.url}<div class="sub">{fmtBytes(r.before!)} → {fmtBytes(r.after!)}{saved(r)}</div>{/if}
       {#if r.note}<div class="sub warn">{r.note}</div>{/if}</div>
       {#if r.url}<SaveButton url={r.url} name={r.filename!} /><a class="btn small" href={r.url} download={r.filename}>Download</a>{/if}</li>

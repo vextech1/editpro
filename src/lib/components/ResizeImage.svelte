@@ -252,10 +252,10 @@
 <button class="btn" type="button" disabled={!ready} onclick={run}>Resize</button>
 {#if needsConfirm && !confirmed && files.length}<p class="sub">Confirm the size above to continue.</p>{/if}
 <p role="status" aria-live="polite" class:warn={bad} class="muted">{status}</p>
-{#if zip}<div style="margin-bottom:10px"><div class="row"><div class="grow"><strong>All results</strong><div class="sub">{fmtBytes(zip.bytes)}</div></div><a class="btn small" href={zip.url} download="resized-photos.zip">Download all (ZIP)</a></div></div>{/if}
+{#if zip}<div style="margin-bottom:10px"><div class="row result"><div class="grow"><strong>All results</strong><div class="sub">{fmtBytes(zip.bytes)}</div></div><a class="btn small" href={zip.url} download="resized-photos.zip">Download all (ZIP)</a></div></div>{/if}
 <ul class="rows">
   {#each results as r}
-    <li class="row"><div class="grow"><strong>{r.name}</strong>
+    <li class="row result"><div class="grow"><strong>{r.name}</strong>
       {#if r.bytes}<div class="sub">{r.kind === 'pdf' ? 'PDF' : 'Image'}, {fmtBytes(r.bytes)}</div>{/if}
       {#if r.note}<div class="sub warn">{r.note}</div>{/if}</div>
       {#if r.url}<SaveButton url={r.url} name={r.filename} /><a class="btn small" href={r.url} download={r.filename}>Download</a>{/if}</li>

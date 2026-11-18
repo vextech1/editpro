@@ -12,11 +12,3 @@
   <a class="btn small" href={url} download={filename} aria-label="{label} {filename}">{label}</a>
   {#if file}<button class="btn small ghost" type="button" aria-label="Open {filename}" onclick={open}>Open</button>{/if}</div>
 {#if note}<p class="warn" role="status" style="margin:6px 0 0">{note}</p>{/if}
-
-<style>
-  /* On a phone the file name gets a line of its own, so a long name is not squeezed to a sliver by the buttons. */
-  @media (max-width: 560px) {
-    .result { flex-wrap: wrap; }
-    .result .grow { flex: 1 1 100%; }
-  }
-</style>

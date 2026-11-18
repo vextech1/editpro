@@ -273,7 +273,7 @@
           <FileThumb file={f} />
           <div class="grow">
             {#if renaming === f.id}
-              <input type="text" bind:value={newName} aria-label="New name" use:focusOnMount onkeydown={(e) => { if (e.key === 'Enter') finishRename(); if (e.key === 'Escape') { e.preventDefault(); renaming = ''; } }} onblur={finishRename} />
+              <input class="rename" type="text" bind:value={newName} aria-label="New name" use:focusOnMount onkeydown={(e) => { if (e.key === 'Enter') finishRename(); if (e.key === 'Escape') { e.preventDefault(); renaming = ''; } }} onblur={finishRename} />
             {:else if !trash && canOpen(f)}<button type="button" class="name" title="Open in editor" onclick={() => open(f)}><strong>{f.name}</strong></button>
             {:else}<strong>{f.name}</strong>{/if}
             {@render meta(f, snippet)}
@@ -318,6 +318,8 @@
   .selbar .grow { flex: 1; }
   .pickrow { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; cursor: pointer; }
   .pick { flex: none; width: 22px; height: 22px; accent-color: var(--accent); }
+  /* The rename field matches the site's other inputs instead of the browser's plain grey box. */
+  .rename { display: block; width: 100%; box-sizing: border-box; margin: 0 0 2px; padding: 9px 12px; font: inherit; font-weight: 650; color: var(--ink); background: var(--paper); border: 1.5px solid var(--accent); border-radius: 10px; }
   .chips { margin: 0 0 10px; }
   .chip { font: inherit; font-size: .9rem; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer; }
   .iconbtn.active { color: var(--accent); }

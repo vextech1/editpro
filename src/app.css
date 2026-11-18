@@ -190,3 +190,10 @@ nav.bottom { display: none; }
 
 /* Ads */
 .adslot { margin: 24px 0; min-height: 180px; } .adslot small { display: block; margin-bottom: 4px; font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+
+/* A result row (name, size and its buttons): on a phone the name gets a line of its own and the buttons wrap below it, so a long name is not squeezed to a sliver and the buttons stay on screen. */
+@media (max-width: 560px) {
+  .row.result { flex-wrap: wrap; }
+  .row.result .grow { flex: 1 1 100%; }
+  .row.result .btn { white-space: nowrap; }
+}

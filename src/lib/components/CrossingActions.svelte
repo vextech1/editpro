@@ -28,7 +28,7 @@
 </script>
 
 {#each crossingsFor(source) as crossing (crossing.label)}
-  <button type="button" class={menuItem ? '' : 'btn small ghost'} role={menuItem ? 'menuitem' : undefined}
+  <button type="button" class={menuItem ? 'sh-mi' : 'btn small ghost'} role={menuItem ? 'menuitem' : undefined}
     disabled={busy || (!files.length && !(url && name))} onclick={() => open(crossing.studio, crossing.tab)}>{crossing.label}</button>
 {/each}
 {#if error}<span class="sub warn" role="status">{error}</span>{/if}
