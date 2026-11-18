@@ -60,7 +60,6 @@ describe('every tool sits in exactly one group', () => {
     const sheetIds = IMAGE_TOOLS.filter((t) => t.open === 'sheet').map((t) => t.id).sort();
     expect(sheetIds).toEqual(['adjust', 'crop', ...SHEETS].sort());
     expect(IMAGE_TOOLS.filter((t) => t.open === 'tab').map((t) => t.slug).sort()).toEqual([...PANEL_TOOLS].sort());
-    expect(IMAGE_TOOLS.filter((t) => t.open === 'action').map((t) => t.id)).toEqual(['rotate', 'flip']);
   });
   it('gives each tool a name, an icon and a line to read in All tools', () => {
     for (const s of studios) for (const t of s.tools) { expect(t.label, t.id).toBeTruthy(); expect(t.icon).toBeTruthy(); expect(allToolRows(s.id, undefined).find((r) => r.tool === t)!.blurb, t.id).toBeTruthy(); }

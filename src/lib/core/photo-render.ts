@@ -3,6 +3,7 @@
 import { renderFit } from './resize.ts';
 import { radiusFor } from './shape.ts';
 import { rrect, drawPhoneFrame, drawWallFrame, type PhoneOpts, type WallOpts } from './frames.ts';
+import { turnedSize, type Turn } from './photo-ops.ts';
 import { applyRedaction, type RedactKind, type Rect } from './redact.ts';
 import { markSize, placeAt, placeMark, tilePoints, type Pos } from './watermark.ts';
 import { textOn } from './palette.ts';
@@ -15,6 +16,14 @@ export function renderRound(src: HTMLCanvasElement, w: number, h: number, radius
   const crop = renderFit(src, src.width, src.height, w, h, 'fill', 'rgba(0,0,0,0)', zoom, panX, panY);
   const out = mk(w, h), ctx = out.getContext('2d')!;
   ctx.save(); rrect(ctx, 0, 0, out.width, out.height, radiusFor(out.width, out.height, radiusPct)); ctx.clip(); ctx.drawImage(crop, 0, 0); ctx.restore(); crop.width = 0;
+  return out;
+}
+
+/** A copy of `src` mirrored and turned as `t` says (see Turn). The same code makes the live preview and the saved picture. */
+export function renderTurn(src: HTMLCanvasElement, t: Turn) {
+  const { w, h } = turnedSize(src.width, src.height, t), out = mk(w, h), ctx = out.getContext('2d')!;
+  ctx.translate(w / 2, h / 2); ctx.rotate((t.turns * Math.PI) / 2); ctx.scale(t.flipH ? -1 : 1, t.flipV ? -1 : 1);
+  ctx.drawImage(src, -src.width / 2, -src.height / 2);
   return out;
 }
 

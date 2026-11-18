@@ -22,6 +22,7 @@
   import ParamTabs from './ParamTabs.svelte';
   import CropOverlay from './CropOverlay.svelte';
   import { detectCropBox } from '#lib/core/auto-crop.ts';
+  import TurnSheet from './sheets/TurnSheet.svelte';
   import ResizeSheet from './sheets/ResizeSheet.svelte';
   import RoundSheet from './sheets/RoundSheet.svelte';
   import MarkupSheet from './sheets/MarkupSheet.svelte';
@@ -170,8 +171,6 @@
   }
   function pick(id: string) {
     msg = ''; menu = false;
-    // Rotate and Flip are instant actions: do them and leave the open group sheet (or All tools list) where it is, so they can be tapped again.
-    if (id === 'rotate' || id === 'flip') { if (!busy) void transform(id); return; }
     backTo = allTools ? ALL_TOOLS_ID : group; group = null; allTools = false;
     if (id === 'crop') { resetCrop(); tool = 'crop'; }   // start from the whole photo; Detect edges is a button, because the detector suits scans, not scenes
     else if (id === 'adjust') { adj = { ...NO_ADJUST }; tool = 'adjust'; }
@@ -201,15 +200,6 @@
     const sheet = (TAB_SHEET as Record<string, ToolId>)[st.tab];
     if (sheet && base && !tool) untrack(() => { st.tab = HOME; pick(sheet); });
   });
-  async function transform(kind: 'rotate' | 'flip') {
-    if (!base) return; const b = base;
-    await run(async () => {
-      const sw = kind === 'rotate', c = document.createElement('canvas');
-      c.width = sw ? b.height : b.width; c.height = sw ? b.width : b.height;
-      const x = c.getContext('2d')!; x.translate(c.width / 2, c.height / 2); if (sw) x.rotate(Math.PI / 2); else x.scale(-1, 1);
-      x.drawImage(b, -b.width / 2, -b.height / 2); await save(c, sw ? 'Rotate' : 'Flip'); c.width = 0;
-    });
-  }
   async function applyAdjustTool() {
     if (!base) return cancelTool();
     if (isNeutral(adj)) return nothingToApply();
@@ -292,6 +282,8 @@
       </div>
       <p class="hint">{crop.w} × {crop.h} px. {cropNote || 'Drag the handles on the photo.'}</p>
     </ToolSheet>
+  {:else if base && prev && (tool === 'rotate' || tool === 'flip')}
+    {#key tool}<TurnSheet kind={tool} {base} {prev} {view} {busy} onapply={applyFromSheet} oncancel={cancelTool} bind:outDims />{/key}
   {:else if base && prev && tool === 'resize'}
     <ResizeSheet {base} {prev} {view} {busy} onapply={applyFromSheet} oncancel={cancelTool} bind:outDims />
   {:else if base && prev && tool === 'round'}

@@ -50,9 +50,27 @@ export const startFormat = (type: string) => (FORMATS.some((f) => f.id === type)
 export function limitSide(w: number, h: number, side: number) { return side > 0 ? previewSize(w, h, side) : { w, h, k: 1 }; }
 export const fmtLabel = (type: string) => FORMATS.find((f) => f.id === type)?.label ?? 'PNG';
 
+// ---------- Rotate and Flip ----------
+/** The picture as the Rotate and Flip sheets see it: the photo is mirrored first, then turned clockwise by `turns` quarter turns. */
+export interface Turn { turns: number; flipH: boolean; flipV: boolean }
+export const NO_TURN: Turn = { turns: 0, flipH: false, flipV: false };
+export const isTurned = (t: Turn) => ((t.turns % 4) + 4) % 4 !== 0 || t.flipH || t.flipV;
+/** Quarter turns clockwise (use a negative number for anticlockwise), kept within 0 to 3. */
+export const turnBy = (t: Turn, quarters: number): Turn => ({ ...t, turns: (((t.turns + quarters) % 4) + 4) % 4 });
+/**
+ * Mirror what is on screen, left to right or top to bottom. After a quarter turn the picture's own sides have swapped places,
+ * so the mirror has to be applied to the other axis of the photo, or the Flip buttons would seem to do the opposite.
+ */
+export function flipOnScreen(t: Turn, axis: 'h' | 'v'): Turn {
+  const sideways = t.turns % 2 !== 0, onPhotoH = sideways ? axis === 'v' : axis === 'h';
+  return onPhotoH ? { ...t, flipH: !t.flipH } : { ...t, flipV: !t.flipV };
+}
+/** Size of a w × h picture after the turns: a quarter turn swaps width and height. */
+export const turnedSize = (w: number, h: number, t: Turn) => (t.turns % 2 !== 0 ? { w: h, h: w } : { w, h });
+
 // ---------- which photo tab opens which sheet ----------
 /** Photo Studio tabs that now live in the editor as sheets (slug → sheet). The batch tools (Rotate several, Collage, Compress, Convert, Colour Picker) stay as panels. */
 export const TAB_SHEET = { 'resize-image': 'resize', 'round-image': 'round', 'annotate-image': 'markup', 'redact-image': 'hide', 'watermark-image': 'watermark', 'photo-frames': 'frames' } as const;
-export const SHEETS = ['resize', 'round', 'markup', 'hide', 'watermark', 'frames', 'export'] as const;
+export const SHEETS = ['rotate', 'flip', 'resize', 'round', 'markup', 'hide', 'watermark', 'frames', 'export'] as const;
 /** Batch or inspection tools stay in the dock's More panel instead of replacing the current photo. */
 export const PANEL_TOOLS = ['collage-images', 'compress-image', 'convert-image', 'color-picker'] as const;

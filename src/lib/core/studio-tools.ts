@@ -5,8 +5,8 @@ import { PDF_TOOLS } from './pdf-studio.ts';
 import { PANEL_TOOLS } from './photo-ops.ts';
 import { toolSupports, unsupportedNote, workspaces, type FileKind, type Workspace, type WorkspaceId } from './workspaces.ts';
 
-/** `sheet`: a sheet of the editor. `action`: happens at once (Rotate, Flip). `tab`: the tool's own tab or panel. */
-export type ToolOpen = 'sheet' | 'action' | 'tab';
+/** `sheet`: a sheet of the editor, with a live preview. `tab`: the tool's own tab or panel. */
+export type ToolOpen = 'sheet' | 'tab';
 export interface StudioTool {
   id: string;
   label: string;
@@ -25,8 +25,8 @@ export const ALL_TOOLS_ID = 'all-tools';
 export const IMAGE_TOOLS: readonly StudioTool[] = [
   { id: 'crop', label: 'Crop', icon: 'crop', open: 'sheet', blurb: 'Trim the photo to a shape or size.' },
   { id: 'adjust', label: 'Adjust', icon: 'adjust', open: 'sheet', slug: 'edit-image', blurb: 'Brightness, contrast, colour and clean document.' },
-  { id: 'rotate', label: 'Rotate', icon: 'rotate', open: 'action', blurb: 'Turn the photo a quarter turn.' },
-  { id: 'flip', label: 'Flip', icon: 'flip', open: 'action', blurb: 'Mirror the photo.' },
+  { id: 'rotate', label: 'Rotate', icon: 'rotate', open: 'sheet', blurb: 'Turn the photo and see it before you apply.' },
+  { id: 'flip', label: 'Flip', icon: 'flip', open: 'sheet', blurb: 'Mirror the photo and see it before you apply.' },
   { id: 'resize', label: 'Resize', icon: 'resize', open: 'sheet', slug: 'resize-image' },
   { id: 'round', label: 'Round', icon: 'round', open: 'sheet', slug: 'round-image' },
   { id: 'markup', label: 'Draw & Text', icon: 'draw', open: 'sheet', slug: 'annotate-image' },
