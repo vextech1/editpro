@@ -8,7 +8,7 @@
   import ReadingMode from '#lib/components/ReadingMode.svelte';
   import { sendTo } from '#lib/workspace.svelte.ts';
   import { fileViewerHref } from '#lib/core/cloud-library.ts';
-  import { categoryLabel, shareLink } from '#lib/core/class-library.ts';
+  import { canShareNatively, categoryLabel, shareLink, shareNatively } from '#lib/core/class-library.ts';
   import { downloadErrorMessage, friendlyCloudError, mimeOf, type CloudFile } from '#lib/core/cloud-library.ts';
   import { fetchCloudFile, listCloudFiles, saveCloudFile } from '#lib/cloud/firebase.ts';
   import { getUserFile } from '#lib/cloud/user.ts';
@@ -38,6 +38,13 @@
   const kind = $derived(file ? fileKind(mimeOf(file.ext)) : undefined);
   const studio = $derived(kind === 'pdf' ? 'Document Studio' : kind === 'image' ? 'Photo Studio' : '');
   const shareHref = $derived(file ? shareLink(file.title, fileViewerHref(file.id)) : '');
+  // Share opens the phone's share sheet so the student can pick any app; with none available the link itself opens WhatsApp.
+  function share(e: MouseEvent) {
+    if (!file || !canShareNatively()) return;
+    e.preventDefault();
+    const { title, id } = file;
+    void shareNatively(title, fileViewerHref(id)).then((r) => { if (r === 'failed') window.open(shareLink(title, fileViewerHref(id)), '_blank', 'noopener'); });
+  }
   // Reading mode is a history entry, so the phone's Back button leaves reading instead of leaving the page.
   const reading = $derived(!!page.state.reading);
   const canRead = $derived(!!file && ((file.ext === 'pdf' && !!doc) || (file.ext === 'txt' && !!textPreview)));
@@ -150,7 +157,7 @@
     <div class="actions">
       {#if canRead}<button class="btn small" type="button" onclick={startReading}>Read</button>{/if}
       <button class="btn small {canRead ? 'ghost' : ''}" type="button" onclick={editFile} disabled={!kind || busy || !content} title={kind ? `Edit in ${studio}` : 'Studio editing is available for PDFs and images'}>{busy ? 'Working…' : kind ? `Edit in ${studio}` : 'Edit unavailable'}</button>
-      <a class="btn small ghost" href={shareHref} target="_blank" rel="noopener noreferrer">Share</a>
+      <a class="btn small ghost" href={shareHref} target="_blank" rel="noopener noreferrer" onclick={share}>Share</a>
       {#if file.user}<a class="btn small ghost" href={reportHref(SITE.contactEmail, { id: file.id, title: file.title })}>Report</a>{/if}
       <button class="btn small ghost" type="button" onclick={downloadFile} disabled={busy}>{progress || 'Download'}</button>
     </div>

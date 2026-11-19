@@ -64,9 +64,21 @@ export const whatsappLink = (message: string): string => `https://wa.me/${SITE.w
 export const emailLink = (message: string): string =>
   `mailto:${SITE.contactEmail}?subject=${encodeURIComponent('EditPro Class Library: file request')}&body=${encodeURIComponent(message)}`;
 
-/** A WhatsApp link that lets a student share the Library location containing a file. */
+/** A WhatsApp link that lets a student share the Library location containing a file. Used where the device has no share sheet. */
 export const shareLink = (title: string, pagePath: string): string =>
   `https://wa.me/?text=${encodeURIComponent(`${title} (EditPro Class Library): ${abs(pagePath)}`)}`;
+
+/** What the device's share sheet is given for a file: any app the student picks (WhatsApp, Telegram, Messages, Copy link...) receives it. */
+export const sharePayload = (title: string, pagePath: string) => ({ title, text: `${title} (EditPro Class Library)`, url: abs(pagePath) });
+/** `shared`: the sheet took it. `cancelled`: the student closed the sheet. `failed`: the sheet could not open. `unsupported`: this browser has no share sheet. */
+export type ShareResult = 'shared' | 'cancelled' | 'failed' | 'unsupported';
+type ShareNav = Partial<Pick<Navigator, 'share'>>;
+export const canShareNatively = (nav: ShareNav = typeof navigator === 'undefined' ? {} : navigator): boolean => typeof nav.share === 'function';
+export async function shareNatively(title: string, pagePath: string, nav: ShareNav = typeof navigator === 'undefined' ? {} : navigator): Promise<ShareResult> {
+  if (typeof nav.share !== 'function') return 'unsupported';
+  try { await nav.share(sharePayload(title, pagePath)); return 'shared'; }
+  catch (e) { return (e as { name?: string })?.name === 'AbortError' ? 'cancelled' : 'failed'; }
+}
 
 /** True when a file was added in the last `days` days. `now` is passed in so the same code gives the same answer in tests. */
 export function isRecent(added: string | undefined, now: number, days = 14): boolean {

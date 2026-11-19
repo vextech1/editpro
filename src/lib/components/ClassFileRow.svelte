@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fileViewerHref } from '#lib/core/cloud-library.ts';
-  import { categoryLabel, fmtAdded, isRecent, shareLink, type ClassFile } from '#lib/core/class-library.ts';
+  import { canShareNatively, categoryLabel, fmtAdded, isRecent, shareLink, shareNatively, type ClassFile } from '#lib/core/class-library.ts';
   import { fmtBytes } from '#lib/core/format.ts';
   import { downloadErrorMessage } from '#lib/core/cloud-library.ts';
   import { saveCloudFile } from '#lib/cloud/firebase.ts';
@@ -25,6 +25,12 @@
     } catch (e) { failed = downloadErrorMessage(e); }
     finally { progress = ''; }
   }
+  // Share opens the phone's share sheet so the student can pick any app. Where there is none (some desktop browsers) the link itself opens WhatsApp.
+  function share(e: MouseEvent) {
+    if (!canShareNatively()) return;
+    e.preventDefault();
+    void shareNatively(file.title, pagePath).then((r) => { if (r === 'failed') window.open(shareLink(file.title, pagePath), '_blank', 'noopener'); });
+  }
   const detail = $derived([categoryLabel(file.category, file.label), file.ext.toUpperCase(), fmtBytes(file.size), fmtAdded(file.added)].filter(Boolean).join(' · '));
   const viewerHref = $derived(file.cloud ? fileViewerHref(file.cloud.id) : '#');
 </script>
@@ -41,7 +47,7 @@
   <div class="actions">
   <a class="btn small" href={viewerHref} aria-label={`Open ${file.title}`}>Open</a>
   {#if file.student && file.cloud}<a class="share" href={reportHref(SITE.contactEmail, { id: file.cloud.id, title: file.title })} aria-label={`Report ${file.title}`}>Report</a>{/if}
-  <a class="share" href={shareLink(file.title, pagePath)} target="_blank" rel="noopener noreferrer" aria-label={`Share ${file.title} on WhatsApp`}>Share</a>
+  <a class="share" href={shareLink(file.title, pagePath)} target="_blank" rel="noopener noreferrer" onclick={share} aria-label={`Share ${file.title}`}>Share</a>
   <button class="btn small" type="button" onclick={getCloud} disabled={!!progress} aria-label={`Download ${file.title}`}>{progress || (failed ? 'Try again' : 'Download')}</button>
   </div>
 </li>

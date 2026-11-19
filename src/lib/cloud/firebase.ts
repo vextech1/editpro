@@ -83,10 +83,10 @@ function makeStore({ fs, db }: Awaited<ReturnType<typeof openFirebase>>, student
       const byShard = new Map<number, Record<string, unknown>>(); const pending: Record<string, unknown> = {}; const at = Date.now();
       for (const f of files) {
         byShard.set(f.shard, { ...(byShard.get(f.shard) ?? {}), [f.id]: fs.deleteField() });
-        pending[f.id] = { parts: f.parts, kind: 'delete', at };
+        if (f.parts > 0) pending[f.id] = { parts: f.parts, kind: 'delete', at };   // a link has no pieces to clean up
       }
       for (const [shard, removed] of byShard) batch.set(shardDoc(shard), { files: removed }, { merge: true });
-      if (files.length) batch.set(fs.doc(db, ...TRASH), { pending }, { merge: true });
+      if (Object.keys(pending).length) batch.set(fs.doc(db, ...TRASH), { pending }, { merge: true });
       batch.set(fs.doc(db, ...STRUCTURE), { sections: structure });
       await batch.commit();
     },

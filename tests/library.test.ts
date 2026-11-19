@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  countLabel, emailLink, filterFiles, isRecent, requestMessage, shareLink, titleFromFilename, whatsappLink
+  canShareNatively, countLabel, emailLink, filterFiles, isRecent, requestMessage, shareLink, sharePayload, shareNatively, titleFromFilename, whatsappLink
 } from '../src/lib/core/class-library';
 import { SITE } from '../src/lib/site';
 
@@ -46,6 +46,26 @@ describe('Library requests and sharing', () => {
     const url = shareLink('Week 1 Intro', '/class-library?section=school&class=form-1');
     expect(url.startsWith('https://wa.me/?text=')).toBe(true);
     expect(decodeURIComponent(url.split('text=')[1])).toContain('https://editpro.site/class-library?section=school&class=form-1');
+  });
+
+  it('gives the share sheet the title, a short text and the link', () => {
+    expect(sharePayload('Week 1 Intro', '/class-library?class=form-1')).toEqual({ title: 'Week 1 Intro', text: 'Week 1 Intro (EditPro Class Library)', url: 'https://editpro.site/class-library?class=form-1' });
+  });
+
+  it('shares through the share sheet when the browser has one', async () => {
+    const calls: unknown[] = [];
+    const nav = { share: async (d: unknown) => { calls.push(d); } };
+    expect(canShareNatively(nav)).toBe(true);
+    expect(await shareNatively('A', '/x', nav)).toBe('shared');
+    expect(calls).toEqual([sharePayload('A', '/x')]);
+  });
+
+  it('tells a closed sheet from a broken one, and a browser without one', async () => {
+    const abort = Object.assign(new Error('closed'), { name: 'AbortError' });
+    expect(await shareNatively('A', '/x', { share: async () => { throw abort; } })).toBe('cancelled');
+    expect(await shareNatively('A', '/x', { share: async () => { throw new Error('nope'); } })).toBe('failed');
+    expect(canShareNatively({})).toBe(false);
+    expect(await shareNatively('A', '/x', {})).toBe('unsupported');
   });
 
   it('keeps the WhatsApp number in wa.me form', () => {
