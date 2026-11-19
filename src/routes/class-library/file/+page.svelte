@@ -16,6 +16,7 @@
   import { reportHref } from '#lib/core/moderation.ts';
   import { SITE } from '#lib/site.ts';
   import AccessGate from '#lib/components/AccessGate.svelte';
+  import CreditBox from '#lib/components/CreditBox.svelte';
   import { fileKind } from '#lib/core/workspaces.ts';
   import { fmtBytes } from '#lib/core/format.ts';
   let { data } = $props();
@@ -87,6 +88,7 @@
         if (shared?.status === 'live') entry = { ...shared, user: true };
       }
       if (!entry) throw new Error('This Library file could not be found. It may have been removed.');
+      if (entry.url) { file = entry; loading = false; return; }
       if (!(await requestAccess({ id: entry.id, title: entry.title, uploader: entry.uploader }, () => void loadFile(id, loadId)))) {
         if (loadId !== generation) return;
         file = entry; locked = true; loading = false; return;
@@ -136,7 +138,7 @@
 
 <svelte:head>
   <title>{file ? `${file.title} | Library` : `Library file | ${data.meta.title}`}</title>
-  <meta name="description" content={file ? `${file.title}, ${file.ext.toUpperCase()} file in the EditPro Class Library.` : data.meta.description} />
+  <meta name="description" content={file ? (file.url ? `${file.title}, a link to a file shared in the EditPro Class Library.` : `${file.title}, ${file.ext.toUpperCase()} file in the EditPro Class Library.`) : data.meta.description} />
 </svelte:head>
 
 <p class="back"><a href="/class-library">← Library</a></p>
@@ -151,6 +153,19 @@
     <p class="muted">Your first download is free. To open more files, sign in with Google and share a study document to unlock more downloads.</p>
     <button class="btn" type="button" onclick={() => { loading = true; void loadFile(file!.id, ++generation); }}>Continue</button>
   </section>
+{:else if file && file.url}
+  <div class="file-head">
+    <div class="file-title"><p class="eyebrow">{categoryLabel(file.category, file.label)} · Link</p><h1>{file.title}</h1></div>
+    <div class="actions">
+      <a class="btn small" href={file.url} target="_blank" rel="noopener noreferrer">Visit source</a>
+      <a class="btn small ghost" href={shareHref} target="_blank" rel="noopener noreferrer" onclick={share}>Share</a>
+    </div>
+  </div>
+  <section class="card link-card">
+    {#if file.thumb}<img class="link-thumb" src={file.thumb} alt="" />{/if}
+    <p class="muted">This file is on another website. It opens there, in a new tab.</p>
+  </section>
+  <CreditBox credit={file.credit} hostedAt={file.url} />
 {:else if file}
   <div class="file-head">
     <div class="file-title"><p class="eyebrow">{categoryLabel(file.category, file.label)} · {file.ext.toUpperCase()} · {fmtBytes(file.size)}</p><h1>{file.title}</h1></div>
@@ -177,6 +192,7 @@
     <section class="card unavailable"><h2>Preview not available</h2><p class="muted">Download this {file.ext.toUpperCase()} file to open it in a compatible app.</p></section>
   {/if}
   {#if !kind}<p class="muted edit-note">Edit Studio currently supports PDF and image files.</p>{/if}
+  <CreditBox credit={file.credit} />
   {#if reading && canRead}
     <ReadingMode title={file.title} status={doc ? `Page ${current} of ${doc.numPages}` : ''} onexit={exitReading}>
       {#if doc}
@@ -204,6 +220,9 @@
   .image-wrap { display: grid; place-items: center; min-height: 45vh; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
   .file-preview.image { display: block; max-width: 100%; max-height: 75vh; object-fit: contain; }
   .text-preview { max-height: 75vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); }
+  .link-card { display: flex; align-items: center; gap: 16px; }
+  .link-card p { margin: 0; }
+  .link-thumb { flex: none; width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
   .unavailable { margin-top: 16px; }
   .unavailable h2 { margin-top: 0; }
   .edit-note { margin-top: 10px; }

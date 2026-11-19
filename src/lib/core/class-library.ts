@@ -21,6 +21,9 @@ export const categoryKey = (f: { category: CategoryId; label?: string }): string
 /** File types accepted by the Library upload form. */
 export const ALLOWED_EXT = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'zip', 'png', 'jpg', 'jpeg'] as const;
 
+/** Attribution and usage information shown on the public file page. */
+export interface Credit { by?: string; link?: string; license?: string; note?: string }
+
 export interface ClassFile {
   id: string; name: string; title: string; size: number; ext: string; category: CategoryId;
   /** The admin's own label, used only with the 'other' category. */
@@ -28,6 +31,10 @@ export interface ClassFile {
   /** YYYY-MM-DD. */
   added?: string;
   cloud: { id: string; parts: number; user?: boolean };
+  /** Link entries point to public files on another site and have no stored pieces. */
+  url?: string;
+  thumb?: string;
+  credit?: Credit;
   uploader?: string;
   student?: boolean;
 }

@@ -5,7 +5,7 @@
   import { ALLOWED_EXT, CATEGORIES, MAX_LABEL, categoryKey, cleanLabel, type CategoryId } from '#lib/core/class-library.ts';
   import {
     CLOUD_MAX_BYTES, SPARK_STORAGE_BYTES, checkCloudUpload, checkStorage, chooseShard, cloudForSubject, deleteCloud, deleteTree, duplicateOf, emptyTrash,
-    ENTRY_OVERHEAD_BYTES, PART_OVERHEAD_BYTES, entryBytesFor, friendlyCloudError, relabelCloud, sameNameAs, storageUsed, uploadCloud, type CloudFile, type TrashItem
+    ENTRY_OVERHEAD_BYTES, PART_OVERHEAD_BYTES, addLink, checkLinkUrl, cleanCredit, entryBytesFor, entryExtraBytes, friendlyCloudError, linkName, CREDIT_LIMITS, relabelCloud, sameNameAs, storageUsed, uploadCloud, type CloudFile, type TrashItem
   } from '#lib/core/cloud-library.ts';
   import { isValidEmail, normalizeEmail } from '#lib/core/admins.ts';
   import {
@@ -18,6 +18,7 @@
   } from '#lib/core/library-structure.ts';
   import StudentModeration from '#lib/components/StudentModeration.svelte';
   import { withDetail } from '#lib/core/error-detail.ts';
+  import { makeThumb } from '#lib/core/thumb.ts';
 
   const ACCEPT = ALLOWED_EXT.map((e) => '.' + e).join(',');
   const enabled = cloudEnabled();
@@ -39,6 +40,9 @@
   let renaming = $state(false); let draftRename = $state('');
   let picked = $state<File[]>([]);
   let fileInput = $state<HTMLInputElement>();
+  let linkUrl = $state(''); let linkTitle = $state('');
+  let thumbData = $state(''); let thumbNote = $state(''); let thumbInput = $state<HTMLInputElement>();
+  let credBy = $state(''); let credLink = $state(''); let credLicense = $state(''); let credNote = $state('');
   let busy = $state(false);
   let step = $state('');
   let note = $state('');
@@ -65,6 +69,9 @@
   const files = $derived(inSubject.filter((file) => viewKey && categoryKey(file) === viewKey).sort((a, b) => a.title.localeCompare(b.title, 'en', { numeric: true })));
   const catLabel = $derived(activeKey === 'new' ? (labelText || 'New label') : category === 'other' ? (labelText || 'Other') : (CATEGORIES.find((c) => c.id === category)?.label ?? ''));
   const needsLabel = $derived(activeKey === 'new' && !labelText);
+  const linkCheck = $derived(linkUrl.trim() ? checkLinkUrl(linkUrl) : undefined);
+  const credit = $derived(cleanCredit({ by: credBy, link: credLink, license: credLicense, note: credNote }));
+  const creditLinkBad = $derived(!!credLink.trim() && !cleanCredit({ link: credLink }));
   // A label chip disappears once its last file is deleted (or when another subject is opened): go back to Notes.
   $effect(() => {
     if (activeKey.startsWith('other:') && !customChips.some((c) => c.key === activeKey)) activeKey = 'notes';
@@ -131,6 +138,17 @@
   async function signOut() { try { await adminSignOut(); } catch (e) { fail(e); } picked = []; note = ''; }
   function clearPick() { picked = []; if (fileInput) fileInput.value = ''; }
   function onPick(e: Event) { picked = [...((e.currentTarget as HTMLInputElement).files ?? [])]; note = ''; problem = ''; }
+  function clearThumb() { thumbData = ''; thumbNote = ''; if (thumbInput) thumbInput.value = ''; }
+  function clearLink() { linkUrl = ''; linkTitle = ''; clearThumb(); }
+  function clearCredit() { credBy = ''; credLink = ''; credLicense = ''; credNote = ''; }
+  async function onThumb(e: Event) {
+    const file = (e.currentTarget as HTMLInputElement).files?.[0];
+    thumbData = ''; thumbNote = '';
+    if (!file) return;
+    const made = await makeThumb(file);
+    if (made.ok) thumbData = made.data;
+    else { thumbNote = `The thumbnail was not used: ${made.reason}.`; if (thumbInput) thumbInput.value = ''; }
+  }
 
   function startEdit(level: 'section' | 'class' | 'subject', mode: 'add' | 'rename') {
     const current = level === 'section' ? section : level === 'class' ? cls : subject;
@@ -267,22 +285,53 @@
       for (const [i, file] of batch.entries()) {
         const label = `${file.name} (${i + 1} of ${batch.length})`;
         step = `Uploading ${label}`;
-        const entryBytes = entryBytesFor(file.name);
+        const entryBytes = entryBytesFor(file.name, entryExtraBytes({ credit }));
         const shard = chooseShard(sizes, entryBytes);
         const replaces = sameNameAs(files, file.name).map((old) => ({ id: old.id, parts: old.parts, shard: old.shard ?? 0 }));
         // New copy in and old copy out happen as one write, so students never see two copies or none.
-        await uploadCloud(store, new Uint8Array(await file.arrayBuffer()), { name: file.name, section: sectionId, cls: classId, subject: subjectId, category, ...(labelText ? { label: labelText } : {}), shard, shardCount: sizes.length, replaces },
+        await uploadCloud(store, new Uint8Array(await file.arrayBuffer()), { name: file.name, section: sectionId, cls: classId, subject: subjectId, category, ...(labelText ? { label: labelText } : {}), ...(credit ? { credit } : {}), shard, shardCount: sizes.length, replaces },
           (d, t) => (step = `Uploading ${label}: ${d} of ${t} parts`));
         added++; sizes[shard] = (sizes[shard] ?? 0) + entryBytes;
       }
       note = `Added ${added} ${added === 1 ? 'file' : 'files'} to ${subject.name} › ${catLabel}. Students see it straight away.${skipped ? ` ${skipped} with a repeated name ${skipped === 1 ? 'was' : 'were'} left out.` : ''}`;
-      clearPick();
+      clearPick(); clearCredit();
     } catch (e) {
       fail(e);
       if (added) note = `Added ${added} of ${batch.length} before the problem.`;
     } finally {
       try { await refresh(); } catch { /* the list shows the last known state */ }
       if (added && activeKey === 'new' && newKey) { activeKey = newKey; draftLabel = ''; }   // the label now has files, so it has its own chip
+      busy = false; step = '';
+    }
+  }
+
+  async function addLinkEntry() {
+    const checked = linkCheck;
+    if (!checked?.ok || !subject || needsLabel) return;
+    if (creditLinkBad) { problem = 'The source link in the acknowledgement is not a public web address. Fix it or leave it empty.'; return; }
+    busy = true; step = 'Checking the Library'; problem = ''; note = '';
+    try { await freshIndex(); } catch (e) { fail(e); busy = false; step = ''; return; }
+    const name = linkName(checked.url);
+    const room = checkStorage(used, [thumbData.length]);
+    if (!room.ok) { problem = room.reason; busy = false; step = ''; return; }
+    const same = sameNameAs(files, name);
+    if (same.length && !confirm('This link is already in this list. Replace it?')) { busy = false; step = ''; return; }
+    try {
+      const store = await adminStore();
+      const sizes = [...shardSizes];
+      const shard = chooseShard(sizes, entryBytesFor(name, entryExtraBytes({ url: checked.url, thumb: thumbData, credit })));
+      step = 'Adding the link';
+      await addLink(store, {
+        url: checked.url, title: linkTitle, section: sectionId, cls: classId, subject: subjectId, category,
+        ...(labelText ? { label: labelText } : {}), ...(thumbData ? { thumb: thumbData } : {}), ...(credit ? { credit } : {}),
+        shard, shardCount: sizes.length, replaces: same.map((file) => ({ id: file.id, parts: file.parts, shard: file.shard ?? 0 }))
+      });
+      note = `Added the link to ${subject.name} · ${catLabel}. Students see it straight away.`;
+      clearLink(); clearCredit();
+    } catch (e) { fail(e); }
+    finally {
+      try { await refresh(); } catch { /* the list shows the last known state */ }
+      if (activeKey === 'new' && labelText) { activeKey = `other:${labelText.toLowerCase()}`; draftLabel = ''; }
       busy = false; step = '';
     }
   }
@@ -436,11 +485,42 @@
           </button>
         </div>
 
+        <p class="or muted" aria-hidden="true">or</p>
+        <div class="card">
+          <label for="link-url">Add a link instead</label>
+          <input id="link-url" type="url" inputmode="url" autocomplete="off" placeholder="https://example.com/notes.pdf" bind:value={linkUrl} disabled={busy} />
+          <p class="muted small">A link to a file on any public website. Nothing is stored here, so it uses no storage. Students open it on the original site.</p>
+          {#if linkCheck && !linkCheck.ok}<div class="why bad-text">Not added: {linkCheck.reason}.</div>{/if}
+          <label for="link-title">Title <span class="muted">(optional)</span></label>
+          <input id="link-title" maxlength="120" placeholder="Leave empty to use the name in the link" bind:value={linkTitle} disabled={busy} />
+          <label for="link-thumb">Thumbnail <span class="muted">(optional)</span></label>
+          <input id="link-thumb" type="file" accept="image/jpeg,image/png,image/webp" bind:this={thumbInput} onchange={onThumb} disabled={busy} />
+          <p class="muted small">A picture shown beside the title. It is made small on this device. Leave it out to show the file type instead.</p>
+          {#if thumbData}<div class="thumbrow"><img class="thumb-mini" src={thumbData} alt="Thumbnail preview" /><button class="btn small" type="button" onclick={clearThumb} disabled={busy}>Remove thumbnail</button></div>{/if}
+          {#if thumbNote}<div class="why bad-text">{thumbNote}</div>{/if}
+          <button class="btn" type="button" onclick={addLinkEntry} disabled={busy || !linkCheck?.ok || needsLabel || creditLinkBad}>Add link to {catLabel}</button>
+        </div>
+
+        <div class="card">
+          <h3 class="credit-h">Source and acknowledgement <span class="muted">(optional)</span></h3>
+          <p class="muted small">Shown to everyone on the file's page. It applies to the files or link you add next, then clears. Use it to credit the author and say how the file may be used.</p>
+          <label for="cred-by">Created by</label>
+          <input id="cred-by" maxlength={CREDIT_LIMITS.by} placeholder="Author, school or publisher" bind:value={credBy} disabled={busy} />
+          <label for="cred-link">Original source link</label>
+          <input id="cred-link" type="url" inputmode="url" autocomplete="off" placeholder="https://" bind:value={credLink} disabled={busy} />
+          {#if creditLinkBad}<div class="why bad-text">That is not a public web address.</div>{/if}
+          <label for="cred-license">Licence or permission</label>
+          <input id="cred-license" maxlength={CREDIT_LIMITS.license} placeholder="e.g. CC BY 4.0, or shared with permission" bind:value={credLicense} disabled={busy} />
+          <label for="cred-note">Acknowledgement</label>
+          <textarea id="cred-note" rows="3" maxlength={CREDIT_LIMITS.note} placeholder="e.g. Thanks to the Mathematics Department for sharing this." bind:value={credNote} disabled={busy}></textarea>
+          <p class="muted small">{credNote.length} of {CREDIT_LIMITS.note} characters.</p>
+        </div>
+
         <h2>Files in {subject.name} · {catLabel}</h2>
         {#if files.length}
           <ul class="rows">
             {#each files as f (f.id)}
-              <li class="row"><span class="grow">{f.title}<div class="sub">{f.name} · {fmtBytes(f.size)}{f.added ? ` · ${f.added}` : ''}</div></span>
+              <li class="row">{#if f.thumb}<img class="thumb-mini" src={f.thumb} alt="" />{/if}<span class="grow">{f.title}<div class="sub">{f.url ? `Link · ${f.url}` : `${f.name} · ${fmtBytes(f.size)}`}{f.added ? ` · ${f.added}` : ''}{f.credit ? ' · has acknowledgement' : ''}</div></span>
                 <button class="btn small danger" type="button" onclick={() => remove(f)} disabled={busy}>Delete</button></li>
             {/each}
           </ul>
@@ -476,8 +556,15 @@
   .back { margin: 0 0 10px; } .back a { color: var(--muted); }
   h2 { margin: 22px 0 8px; font-size: 1.1rem; }
   label { display: block; font-weight: 600; margin: 12px 0 6px; }
-  select, input[type='file'], input[type='email'] { display: block; box-sizing: border-box; width: 100%; font: inherit; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+  select, input[type='file'], input[type='email'], input[type='url'], input:not([type]), textarea { display: block; box-sizing: border-box; width: 100%; font: inherit; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
   input[type='email'] { margin-bottom: 10px; }
+  textarea { resize: vertical; min-height: 5.5em; }
+  .or { text-align: center; margin: 14px 0 -6px; }
+  .credit-h { margin: 0; font-size: 1rem; }
+  .bad-text { color: var(--warn); }
+  .thumbrow { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+  .thumb-mini { flex: none; width: 44px; height: 44px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); margin-right: 10px; }
+  .thumbrow .thumb-mini { width: 64px; height: 64px; margin: 0; }
   select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .card > .btn { margin-top: 14px; }
   .small { font-size: .88rem; margin: 8px 0 0; } .usage { margin-top: 22px; }

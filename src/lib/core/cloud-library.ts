@@ -5,7 +5,7 @@
 //   libraryChunks/<file id>/parts/<0000..> the file's bytes, one piece per document
 // This file is the browser-safe logic (checks, cutting, joining, upload and delete order). The Firebase calls live in #lib/cloud/firebase.ts.
 import type { LibraryStructure } from '#lib/core/library-structure.ts';
-import { CATEGORIES, ALLOWED_EXT, cleanLabel, extOf, isAllowedExt, titleFromFilename, type CategoryId, type ClassFile } from '#lib/core/class-library.ts';
+import { CATEGORIES, ALLOWED_EXT, cleanLabel, extOf, isAllowedExt, titleFromFilename, type CategoryId, type ClassFile, type Credit } from '#lib/core/class-library.ts';
 
 /** Bytes per piece. Under the 1 MiB document limit with room for the field name and path. */
 export const CHUNK_BYTES = 800_000;
@@ -26,9 +26,88 @@ export interface CloudEntry {
   section: string; cls: string; subject?: string; category: CategoryId; added: string; parts: number;
   /** Custom label for the 'other' category (what the admin typed). */
   label?: string;
+  /** External file link; link entries have no pieces and a size of zero. */
+  url?: string;
+  thumb?: string;
+  credit?: Credit;
 }
 /** `shard` says which index document lists the file (0 is `library/index`). It is worked out when the index is read; it is not stored in the entry. */
 export interface CloudFile extends CloudEntry { id: string; shard?: number }
+
+export const URL_MAX = 2000;
+export const THUMB_MAX_CHARS = 30_000;
+export const CREDIT_LIMITS = { by: 120, license: 100, note: 600, link: 500 } as const;
+const THUMB_DATA = /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+export const isThumbData = (value: unknown): value is string => typeof value === 'string' && value.length <= THUMB_MAX_CHARS && THUMB_DATA.test(value);
+
+export type UrlCheck = { ok: true; url: string; host: string } | { ok: false; reason: string };
+function notPublicHost(host: string): boolean {
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return true;
+  if (host.startsWith('[') || !host.includes('.')) return true;
+  const match = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) return false;
+  const first = Number(match[1]), second = Number(match[2]);
+  return first === 0 || first === 10 || first === 127 || first >= 224 || (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168) || (first === 100 && second >= 64 && second <= 127);
+}
+
+/** Accepts public HTTP(S) URLs, or a bare website address which is upgraded to HTTPS. */
+export function checkLinkUrl(raw: string): UrlCheck {
+  const text = (raw ?? '').trim();
+  const bad = (reason: string): UrlCheck => ({ ok: false, reason });
+  if (!text) return bad('paste the link to the file');
+  if (/\s/.test(text)) return bad('the link has spaces in it');
+  if (text.length > URL_MAX) return bad(`the link is longer than ${URL_MAX} characters`);
+  let url: URL;
+  try { url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(text) ? text : `https://${text}`); }
+  catch { return bad('that is not a valid link'); }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return bad('only http and https links are allowed');
+  if (url.username || url.password) return bad('links with a user name or password in them are not allowed');
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  if (notPublicHost(host)) return bad('the link must point to a public website');
+  url.hash = '';
+  return { ok: true, url: url.href, host: host.replace(/^www\./, '') };
+}
+
+const lastSegment = (value: string): string => {
+  try {
+    const segment = new URL(value).pathname.split('/').filter(Boolean).pop() ?? '';
+    try { return decodeURIComponent(segment); } catch { return segment; }
+  } catch { return ''; }
+};
+export function extFromUrl(url: string): string {
+  const extension = extOf(lastSegment(url));
+  return isAllowedExt(extension) ? extension : 'link';
+}
+export function linkName(url: string): string {
+  let parsed: URL | undefined;
+  try { parsed = new URL(url); } catch { /* Invalid input is handled by checkLinkUrl. */ }
+  const raw = parsed ? `${parsed.hostname.replace(/^www\./, '')}${parsed.pathname}${parsed.search}` : url;
+  const name = raw.replace(/[#?%\\/&=]+/g, '-').replace(/-{2,}/g, '-').replace(/^[-._]+|-+$/g, '').slice(0, 90);
+  return name || 'link';
+}
+export function titleFromUrl(url: string): string {
+  const segment = lastSegment(url);
+  const title = segment && /[a-z]/i.test(segment) ? titleFromFilename(segment) : '';
+  if (title) return title;
+  const checked = checkLinkUrl(url);
+  return checked.ok ? checked.host : 'Link';
+}
+
+const oneLine = (value: unknown, max: number): string => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '';
+const paragraph = (value: unknown, max: number): string => typeof value === 'string'
+  ? value.replace(/\r\n?/g, '\n').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, max) : '';
+export function cleanCredit(raw: unknown): Credit | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const source = raw as Record<string, unknown>;
+  const by = oneLine(source.by, CREDIT_LIMITS.by);
+  const license = oneLine(source.license, CREDIT_LIMITS.license);
+  const note = paragraph(source.note, CREDIT_LIMITS.note);
+  const checked = typeof source.link === 'string' && source.link.trim() ? checkLinkUrl(source.link) : undefined;
+  const link = checked?.ok && checked.url.length <= CREDIT_LIMITS.link ? checked.url : '';
+  const credit: Credit = { ...(by ? { by } : {}), ...(link ? { link } : {}), ...(license ? { license } : {}), ...(note ? { note } : {}) };
+  return Object.keys(credit).length ? credit : undefined;
+}
 
 export const ID_PATTERN = /^f[a-z0-9]{8,32}$/;
 const ID = ID_PATTERN;
@@ -41,7 +120,9 @@ export const INDEX_SHARD_BYTES = 600_000;
 export const MAX_SHARDS = 20;
 export const shardDocName = (n: number): string => (n === 0 ? 'index' : `index-${n}`);
 /** A generous guess at how much room one new index entry takes. */
-export const entryBytesFor = (name: string): number => 500 + name.length * 3;
+export const entryBytesFor = (name: string, extra = 0): number => 500 + name.length * 3 + extra;
+export const entryExtraBytes = (meta: { url?: string; thumb?: string; credit?: Credit }): number =>
+  (meta.url?.length ?? 0) + (meta.thumb?.length ?? 0) + (meta.credit ? JSON.stringify(meta.credit).length : 0);
 /** How many index documents the first one says there are. Anything unexpected means 1. */
 export function parseShardCount(first: unknown): number {
   const n = (first as { shards?: unknown } | null | undefined)?.shards;
@@ -140,20 +221,31 @@ export function parseCloudIndex(data: unknown): CloudFile[] {
   for (const [id, raw] of Object.entries(files as Record<string, unknown>)) {
     const e = raw as Partial<Record<keyof CloudEntry, unknown>> | null;
     if (!ID.test(id) || !e || typeof e !== 'object') continue;
-    const { name, title, size, ext, section, cls, subject, category, added, parts, label } = e;
-    if (typeof name !== 'string' || !name || BAD_NAME.test(name) || typeof ext !== 'string' || !isAllowedExt(ext)) continue;
+    const { name, title, size, ext, section, cls, subject, category, added, parts, label, url, thumb, credit } = e;
+    const link = url === undefined ? undefined : typeof url === 'string' ? checkLinkUrl(url) : ({ ok: false } as const);
+    if (link && !link.ok) continue;
+    if (typeof name !== 'string' || !name || BAD_NAME.test(name) || typeof ext !== 'string' || !(isAllowedExt(ext) || (link && ext === 'link'))) continue;
     if (typeof section !== 'string' || !section || typeof cls !== 'string' || !cls || !isCategory(category)) continue;
     if (subject !== undefined && typeof subject !== 'string') continue;
     if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) continue;
-    if (typeof parts !== 'number' || !Number.isInteger(parts) || parts < 1 || parts > MAX_PARTS + 1) continue;
-    out.push({ id, name, title: typeof title === 'string' && title.trim() ? title.trim() : titleFromFilename(name), size, ext, section, cls, ...(typeof subject === 'string' ? { subject } : {}), category, ...(category === 'other' && cleanLabel(label) ? { label: cleanLabel(label) } : {}), added: typeof added === 'string' && DATE.test(added) ? added : '', parts });
+    if (link) { if (parts !== 0 || size !== 0) continue; }
+    else if (typeof parts !== 'number' || !Number.isInteger(parts) || parts < 1 || parts > MAX_PARTS + 1) continue;
+    const cleaned = cleanCredit(credit);
+    out.push({
+      id, name, title: typeof title === 'string' && title.trim() ? title.trim() : titleFromFilename(name), size, ext, section, cls,
+      ...(typeof subject === 'string' ? { subject } : {}), category,
+      ...(category === 'other' && cleanLabel(label) ? { label: cleanLabel(label) } : {}),
+      added: typeof added === 'string' && DATE.test(added) ? added : '', parts: parts as number,
+      ...(link?.ok ? { url: link.url } : {}), ...(isThumbData(thumb) ? { thumb } : {}), ...(cleaned ? { credit: cleaned } : {})
+    });
   }
   return out;
 }
 
 export const toClassFile = (f: CloudFile): ClassFile => ({
   id: `cloud/${f.id}`, name: f.name, title: f.title, size: f.size, ext: f.ext, category: f.category, ...(f.label ? { label: f.label } : {}),
-  added: f.added || undefined, cloud: { id: f.id, parts: f.parts }
+  added: f.added || undefined, cloud: { id: f.id, parts: f.parts },
+  ...(f.url ? { url: f.url } : {}), ...(f.thumb ? { thumb: f.thumb } : {}), ...(f.credit ? { credit: f.credit } : {})
 });
 export const fileViewerHref = (id: string): string => `/class-library/file?id=${encodeURIComponent(id)}`;
 export const cloudForClass = (files: CloudFile[], section: string, cls: string): CloudFile[] => files.filter((f) => f.section === section && f.cls === cls);
@@ -169,7 +261,7 @@ export const storedSize = (size: number): number => size + Math.max(1, Math.ceil
 export function storageUsed(files: CloudFile[], trash: TrashItem[] = []): number {
   const live = new Set(files.map((f) => f.id));
   const pieces = trash.filter((t) => !live.has(t.id)).reduce((n, t) => n + t.parts * (CHUNK_BYTES + PART_OVERHEAD_BYTES), 0);
-  return files.reduce((n, f) => n + storedSize(f.size), 0) + pieces;
+  return files.reduce((n, f) => n + (f.url ? ENTRY_OVERHEAD_BYTES + (f.thumb?.length ?? 0) : storedSize(f.size)), 0) + pieces;
 }
 export type StorageCheck = { ok: true; free: number } | { ok: false; free: number; reason: string };
 /** Whether new files of these sizes fit under the storage limit. All of them must fit, so a batch never stops halfway for lack of room. */
@@ -274,7 +366,7 @@ export async function emptyTrash(store: CloudStore, liveIds: ReadonlySet<string>
  */
 export async function uploadCloud(
   store: CloudStore, bytes: Uint8Array,
-  meta: { name: string; title?: string; section: string; cls: string; subject?: string; category: CategoryId; label?: string; added?: string; shard?: number; shardCount?: number; replaces?: { id: string; parts: number; shard?: number }[] },
+  meta: { name: string; title?: string; section: string; cls: string; subject?: string; category: CategoryId; label?: string; added?: string; credit?: unknown; shard?: number; shardCount?: number; replaces?: { id: string; parts: number; shard?: number }[] },
   onProgress: (done: number, total: number) => void = () => {}, makeId: () => string = newFileId
 ): Promise<string> {
   const chunks = splitChunks(bytes);
@@ -288,10 +380,11 @@ export async function uploadCloud(
     const shard = meta.shard ?? 0;
     if (shard >= (meta.shardCount ?? 1)) await store.setShardCount(shard + 1);   // a new index document is announced before anything is put in it
     // The files being replaced go on the cleanup list first, so their pieces are removed even if this page closes right after the swap.
-    for (const r of replaces) await store.markTrash({ id: r.id, parts: r.parts, kind: 'delete', at: Date.now() });
+    for (const r of replaces) if (r.parts > 0) await store.markTrash({ id: r.id, parts: r.parts, kind: 'delete', at: Date.now() });
     const entry: CloudEntry = {
       name: meta.name, title: meta.title?.trim() || titleFromFilename(meta.name), size: bytes.length, ext: extOf(meta.name),
-      section: meta.section, cls: meta.cls, ...(meta.subject ? { subject: meta.subject } : {}), category: meta.category, ...(meta.category === 'other' && cleanLabel(meta.label) ? { label: cleanLabel(meta.label) } : {}), added: meta.added ?? todayLocal(), parts: chunks.length
+      section: meta.section, cls: meta.cls, ...(meta.subject ? { subject: meta.subject } : {}), category: meta.category, ...(meta.category === 'other' && cleanLabel(meta.label) ? { label: cleanLabel(meta.label) } : {}), added: meta.added ?? todayLocal(), parts: chunks.length,
+      ...(cleanCredit(meta.credit) ? { credit: cleanCredit(meta.credit) } : {})
     };
     indexTouched = true;
     if (replaces.length) await store.replaceEntries({ id, entry, shard }, replaces.map((r) => ({ id: r.id, shard: r.shard ?? 0 })));   // new copy in, old copies out, together
@@ -311,7 +404,35 @@ export async function uploadCloud(
   }
   try { await store.clearTrash(id); } catch { /* harmless: a record for a listed file is only removed, never acted on */ }
   // The old copies are no longer listed. Their pieces are removed now; if that fails, the cleanup list retries, and the upload still counts as done.
-  for (const r of replaces) { try { await store.deleteParts(r.id, r.parts); await store.clearTrash(r.id); } catch { /* retried from the cleanup list */ } }
+  for (const r of replaces) { if (r.parts < 1) continue; try { await store.deleteParts(r.id, r.parts); await store.clearTrash(r.id); } catch { /* retried from the cleanup list */ } }
+  return id;
+}
+
+/** Adds an external file link to the Library index without storing file bytes. */
+export async function addLink(
+  store: CloudStore,
+  meta: { url: string; title?: string; section: string; cls: string; subject?: string; category: CategoryId; label?: string; added?: string; thumb?: string; credit?: unknown; shard?: number; shardCount?: number; replaces?: { id: string; parts: number; shard?: number }[] },
+  makeId: () => string = newFileId
+): Promise<string> {
+  const checked = checkLinkUrl(meta.url);
+  if (!checked.ok) throw new Error(`The link was not added: ${checked.reason}.`);
+  if (meta.thumb && !isThumbData(meta.thumb)) throw new Error('The thumbnail is not a small picture. Choose another one or leave it out.');
+  const id = makeId(), shard = meta.shard ?? 0, replaces = meta.replaces ?? [], credit = cleanCredit(meta.credit);
+  const entry: CloudEntry = {
+    name: linkName(checked.url), title: meta.title?.trim() || titleFromUrl(checked.url), size: 0, ext: extFromUrl(checked.url),
+    section: meta.section, cls: meta.cls, ...(meta.subject ? { subject: meta.subject } : {}), category: meta.category,
+    ...(meta.category === 'other' && cleanLabel(meta.label) ? { label: cleanLabel(meta.label) } : {}),
+    added: meta.added ?? todayLocal(), parts: 0, url: checked.url,
+    ...(meta.thumb ? { thumb: meta.thumb } : {}), ...(credit ? { credit } : {})
+  };
+  if (shard >= (meta.shardCount ?? 1)) await store.setShardCount(shard + 1);
+  for (const file of replaces) if (file.parts > 0) await store.markTrash({ id: file.id, parts: file.parts, kind: 'delete', at: Date.now() });
+  if (replaces.length) await store.replaceEntries({ id, entry, shard }, replaces.map((file) => ({ id: file.id, shard: file.shard ?? 0 })));
+  else await store.setEntry(id, entry, shard);
+  for (const file of replaces) {
+    if (file.parts < 1) continue;
+    try { await store.deleteParts(file.id, file.parts); await store.clearTrash(file.id); } catch { /* retried from the cleanup list */ }
+  }
   return id;
 }
 
@@ -325,6 +446,7 @@ export async function deleteTree(store: CloudStore, files: { id: string; parts: 
   await store.commitRemoval(files.map((f) => ({ id: f.id, parts: f.parts, shard: f.shard ?? 0 })), structure);
   let leftovers = 0;
   for (const f of files) {
+    if (f.parts < 1) continue;
     try { await store.deleteParts(f.id, f.parts); await store.clearTrash(f.id); }
     catch { leftovers++; }
   }
@@ -336,6 +458,7 @@ export async function deleteTree(store: CloudStore, files: { id: string; parts: 
  * If the pieces cannot all be deleted, the error is passed on and the cleanup list keeps the rest for a later retry.
  */
 export async function deleteCloud(store: CloudStore, id: string, parts: number, shard = 0): Promise<void> {
+  if (parts < 1) { await store.removeEntry(id, shard); return; }
   await store.markTrash({ id, parts, kind: 'delete', at: Date.now() });
   try { await store.removeEntry(id, shard); }
   catch (e) { try { await store.clearTrash(id); } catch { /* the file is still listed, so the record is ignored later */ } throw e; }
